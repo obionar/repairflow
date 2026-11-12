@@ -56,6 +56,18 @@ func (t *loginThrottle) failure(key string) {
 	defer t.mu.Unlock()
 	now := t.now()
 	t.prune(now)
+	if _, exists := t.entries[key]; !exists {
+		// Make room for a new key without ever evicting an active lockout.
+		// If every entry is currently locked, leave the map untouched and do
+		// not track this new key; the existing protections remain in force.
+		for len(t.entries) >= maxThrottleKeys {
+			oldest := t.oldestEvictable(now)
+			if oldest == "" {
+				return
+			}
+			delete(t.entries, oldest)
+		}
+	}
 	entry := t.entries[key]
 	if entry.firstFailure.IsZero() || now.Sub(entry.firstFailure) > loginWindow {
 		entry = throttleEntry{firstFailure: now}
@@ -74,16 +86,29 @@ func (t *loginThrottle) success(key string) {
 	delete(t.entries, key)
 }
 
-func (t *loginThrottle) prune(now time.Time) {
-	if len(t.entries) > maxThrottleKeys {
-		// Bounded failure mode: forgetting counters is safer than unbounded
-		// memory growth. Authentication and CSRF checks still apply.
-		t.entries = map[string]throttleEntry{}
-		return
-	}
+// oldestEvictable returns the oldest non-locked entry. Active lockouts are
+// never candidates, so capacity pressure cannot cancel a real lockout.
+func (t *loginThrottle) oldestEvictable(now time.Time) string {
+	var oldestKey string
+	var oldest time.Time
 	for key, entry := range t.entries {
-		expired := !entry.blockedUntil.IsZero() && now.After(entry.blockedUntil)
-		stale := now.Sub(entry.firstFailure) > loginWindow
+		if !entry.blockedUntil.IsZero() && now.Before(entry.blockedUntil) {
+			continue
+		}
+		if oldestKey == "" || entry.firstFailure.Before(oldest) {
+			oldestKey, oldest = key, entry.firstFailure
+		}
+	}
+	return oldestKey
+}
+
+func (t *loginThrottle) prune(now time.Time) {
+	for key, entry := range t.entries {
+		locked := !entry.blockedUntil.IsZero() && now.Before(entry.blockedUntil)
+		expired := !entry.blockedUntil.IsZero() && !now.Before(entry.blockedUntil)
+		// A lockout created late in the failure window gets its own full
+		// duration; the older first-failure timestamp cannot prune it early.
+		stale := !locked && now.Sub(entry.firstFailure) > loginWindow
 		if expired || stale {
 			delete(t.entries, key)
 		}

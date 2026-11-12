@@ -1,6 +1,7 @@
 package web
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -48,6 +49,10 @@ func attachmentHome(a app.Attachment) string {
 }
 
 func statusOf(err error) int {
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		return http.StatusRequestEntityTooLarge
+	}
 	switch errs.CodeOf(err) {
 	case errs.CodeNotFound:
 		return http.StatusNotFound

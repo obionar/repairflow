@@ -32,14 +32,20 @@ var embedded embed.FS
 
 // Server hosts one workspace over HTTP.
 type Server struct {
-	svc          *app.Service
-	tmpl         *template.Template
-	logger       *slog.Logger
-	tr           *i18n.Translator
-	language     string
-	authRequired bool
-	loopbackOnly bool
-	loginLimit   *loginThrottle
+	svc                   *app.Service
+	tmpl                  *template.Template
+	logger                *slog.Logger
+	tr                    *i18n.Translator
+	language              string
+	authRequired          bool
+	loopbackOnly          bool
+	loginLimit            *loginThrottle
+	loginBodyBytes        int64
+	formBodyBytes         int64
+	attachmentBodyBytes   int64
+	loginReadTimeout      time.Duration
+	formReadTimeout       time.Duration
+	attachmentReadTimeout time.Duration
 }
 
 // languageCookie overrides the workspace UI language for one browser.
@@ -56,7 +62,11 @@ func New(svc *app.Service) (*Server, error) {
 		return nil, err
 	}
 	return &Server{svc: svc, tmpl: tmpl, logger: logging.New(false, os.Stderr).With("component", "web"),
-		tr: tr, language: "en", authRequired: true, loginLimit: newLoginThrottle()}, nil
+		tr: tr, language: "en", authRequired: true, loginLimit: newLoginThrottle(),
+		loginBodyBytes: defaultLoginBodyBytes, formBodyBytes: defaultFormBodyBytes,
+		attachmentBodyBytes: defaultAttachmentBodyBytes,
+		loginReadTimeout:    defaultLoginReadTimeout, formReadTimeout: defaultFormReadTimeout,
+		attachmentReadTimeout: defaultAttachmentReadTimeout}, nil
 }
 
 // WithAuthentication configures whether browser login is required. The

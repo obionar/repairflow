@@ -81,7 +81,9 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("Content-Security-Policy", contentSecurityPolicy)
-		if s.loopbackOnly && !hostIsLoopback(r.Host) {
+		if !s.applyRequestBodyLimit(tracked, r) {
+			// The request was refused before any form parsing or authentication work.
+		} else if s.loopbackOnly && !hostIsLoopback(r.Host) {
 			s.renderError(tracked, r, nil, errs.New(errs.CodePermission, "request host is not allowed"), http.StatusForbidden)
 		} else if r.Method == http.MethodPost && !sameOrigin(r) {
 			s.renderError(tracked, r, nil, errs.New(errs.CodeValidation, "request origin does not match the host"), http.StatusForbidden)
@@ -151,10 +153,17 @@ func (s *Server) authed(next func(w http.ResponseWriter, r *http.Request, sess a
 				"role %q may not perform this action", sess.Role), http.StatusForbidden)
 			return
 		}
-		if r.Method == http.MethodPost && !app.SecureTokenEqual(r.FormValue("csrf_token"), sess.CSRFToken) {
-			s.renderError(w, r, sessView(sess), errs.New(errs.CodeValidation,
-				"invalid or missing CSRF token; reload the page and retry"), http.StatusForbidden)
-			return
+		if r.Method == http.MethodPost {
+			if err := parseRequestForm(r); err != nil {
+				s.renderError(w, r, sessView(sess), errs.Wrap(errs.CodeValidation, err,
+					"invalid form body"), statusOf(err))
+				return
+			}
+			if !app.SecureTokenEqual(r.FormValue("csrf_token"), sess.CSRFToken) {
+				s.renderError(w, r, sessView(sess), errs.New(errs.CodeValidation,
+					"invalid or missing CSRF token; reload the page and retry"), http.StatusForbidden)
+				return
+			}
 		}
 		next(w, r, sess)
 	}

@@ -231,6 +231,12 @@ checks; it does not add an API, background polling or automatic restart.
 platform, version, size and hash checks are mandatory. Same-version installs, downgrades, symlinks and
 FIFOs are refused. Verified apply is Linux-only; restart through the service supervisor after success.
 
+`update keygen` creates `release-signing.pub` and `release-signing.key` exclusively. It refuses
+existing files or symlinks instead of overwriting them, writes the private key as owner-only `0600`,
+verifies ownership and modes on readback, and removes a newly created public key if private-key
+creation fails. The output directory must be owned by the current user and must not be group/world
+writable.
+
 ## JSON output
 
 Success:

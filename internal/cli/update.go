@@ -137,29 +137,77 @@ type signResult struct {
 	PublicKeyHex  string `json:"public_key_hex"`
 }
 
-// generateSigningKeys creates a release-signing keypair. The private
-// key is written owner-only and must be kept OFFLINE and OFF the appliance.
+// generateSigningKeys creates a release-signing keypair. Existing targets are
+// never overwritten or followed. A failure removes any partially created pair.
 func generateSigningKeys(outDir string) (*keygenResult, error) {
+	if err := ensurePrivateKeyDir(outDir); err != nil {
+		return nil, errs.Wrap(errs.CodeValidation, err, "unsafe signing-key output directory")
+	}
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, errs.Wrap(errs.CodeInternal, err, "cannot generate signing keys")
 	}
-	if err := os.MkdirAll(outDir, 0o700); err != nil {
-		return nil, errs.Wrap(errs.CodeInternal, err, "cannot create key directory")
-	}
 	pubPath := filepath.Join(outDir, "release-signing.pub")
 	privPath := filepath.Join(outDir, "release-signing.key")
-	if err := os.WriteFile(pubPath, []byte(hex.EncodeToString(pub)+"\n"), 0o644); err != nil {
-		return nil, errs.Wrap(errs.CodeInternal, err, "cannot write public key")
+	if err := writeExclusiveKeyFile(pubPath, []byte(hex.EncodeToString(pub)+"\n"), 0o644); err != nil {
+		return nil, errs.Wrap(errs.CodeValidation, err, "cannot create public key without overwriting")
 	}
-	if err := os.WriteFile(privPath, []byte(hex.EncodeToString(priv)+"\n"), 0o600); err != nil {
-		return nil, errs.Wrap(errs.CodeInternal, err, "cannot write private key")
+	if err := writeExclusiveKeyFile(privPath, []byte(hex.EncodeToString(priv)+"\n"), 0o600); err != nil {
+		if cleanupErr := os.Remove(pubPath); cleanupErr != nil && !os.IsNotExist(cleanupErr) {
+			return nil, errs.Wrap(errs.CodeInternal, cleanupErr, "private-key creation failed and public-key cleanup failed")
+		}
+		return nil, errs.Wrap(errs.CodeValidation, err, "cannot create private key without overwriting")
 	}
 	return &keygenResult{
 		PublicKeyFile: pubPath, PrivateKeyFile: privPath,
 		PublicKeyHex: hex.EncodeToString(pub),
 		Warning:      "keep the private key offline; embed the public key at build time via -X repairflow/internal/buildinfo.PublicKey=...",
 	}, nil
+}
+
+func ensurePrivateKeyDir(outDir string) error {
+	info, err := os.Lstat(outDir)
+	if os.IsNotExist(err) {
+		if err := os.MkdirAll(outDir, 0o700); err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
+	} else if !info.IsDir() {
+		return os.ErrExist
+	}
+	return verifyOwnedDirectory(outDir)
+}
+
+func writeExclusiveKeyFile(path string, data []byte, mode os.FileMode) error {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+	if err != nil {
+		return err
+	}
+	ok := false
+	defer func() {
+		if !ok {
+			_ = file.Close()
+			_ = os.Remove(path)
+		}
+	}()
+	// OpenFile applies the process umask. Set the intended mode through the
+	// already-open descriptor so a restrictive umask cannot cause a refusal or
+	// silently change the documented public/private modes.
+	if err := file.Chmod(mode); err != nil {
+		return err
+	}
+	if _, err := file.Write(data); err != nil {
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	if err := verifyOwnedRegularFile(path, mode); err != nil {
+		return err
+	}
+	ok = true
+	return nil
 }
 
 // signManifest writes a detached Ed25519 signature over the manifest bytes.

@@ -22,7 +22,13 @@ before storing sensitive customer data.
   password for any remotely reachable instance.
 - Session tokens are hashed, expiring and revocable. Password and account-state changes revoke
   affected sessions.
-- Repeated login failures are throttled, with a 15-minute lockout after five failures.
+- Repeated login failures are throttled, with a 15-minute lockout after five failures. The bounded
+  throttle evicts only expired or non-locked entries under capacity pressure; flooding cannot clear
+  an active account lockout.
+- Request bodies are capped before form parsing: 64 KiB for login, 1 MiB for ordinary forms, and the
+  256 MiB attachment limit plus 1 MiB for multipart overhead. Oversized requests receive HTTP 413.
+  Per-request read deadlines are 15 seconds for login, 30 seconds for ordinary forms and five
+  minutes for attachment uploads.
 - Admin, technician and viewer permissions are enforced on the server.
 - Browser mutations use per-session CSRF tokens plus origin or same-origin checks.
 - Cookies are `HttpOnly` and `SameSite=Strict`. Responses include content-security, frame, referrer

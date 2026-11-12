@@ -23,6 +23,10 @@ func (s *Server) loginSubmit(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
+	if err := parseRequestForm(r); err != nil {
+		s.renderError(w, r, nil, errs.Wrap(errs.CodeValidation, err, "invalid login form"), statusOf(err))
+		return
+	}
 	username := r.FormValue("username")
 	key := loginKey(r, username)
 	if wait := s.loginLimit.retryAfter(key); wait > 0 {
