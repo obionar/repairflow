@@ -73,14 +73,15 @@ case "$BINARY" in
   *) BINARY=$(command -v "$BINARY") || fail "cannot find repairflow on PATH" ;;
 esac
 command -v sha256sum >/dev/null 2>&1 || fail "sha256sum is required"
+command -v tar >/dev/null 2>&1 || fail "tar is required"
 
 ARCH=$(uname -m)
 case "$ARCH" in
-  x86_64|amd64) ARCH=amd64 ;;
-  aarch64|arm64) ARCH=arm64 ;;
+  x86_64|amd64) ARCH=amd64; LABEL=x86_64 ;;
+  aarch64|arm64) ARCH=arm64; LABEL=arm64 ;;
   *) fail "unsupported architecture: $ARCH" ;;
 esac
-ARTIFACT=repairflow-linux-$ARCH
+ASSET=repairflow_Linux_$LABEL.tar.gz
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/repairflow-update.XXXXXX")
 
 download() {
@@ -105,9 +106,23 @@ download() {
 
 BASE=${BASE%/}
 RELEASE_URL=$BASE/$REPO/releases/download/$TAG
-download "$RELEASE_URL/manifest.json" "$WORK/manifest.json"
-download "$RELEASE_URL/manifest.sig" "$WORK/manifest.sig"
-download "$RELEASE_URL/$ARTIFACT" "$WORK/$ARTIFACT"
+ARCHIVE=$WORK/$ASSET
+download "$RELEASE_URL/$ASSET" "$ARCHIVE"
+[ -s "$ARCHIVE" ] || fail "release archive is empty: $ASSET"
+
+# Inspect before extraction: require the signed update files and reject unsafe paths.
+tar -tzf "$ARCHIVE" > "$WORK/members.txt" || fail "invalid release archive: $ASSET"
+for member in repairflow manifest.json manifest.sig; do
+  grep -qx -- "$member" "$WORK/members.txt" || fail "release archive is missing $member"
+done
+if grep -Eq '(^/|(^|/)\.\.(/|$))' "$WORK/members.txt"; then
+  fail "release archive contains an unsafe path"
+fi
+tar -xzf "$ARCHIVE" -C "$WORK" repairflow manifest.json manifest.sig ||
+  fail "cannot extract release archive"
+for member in repairflow manifest.json manifest.sig; do
+  [ -f "$WORK/$member" ] && [ ! -L "$WORK/$member" ] || fail "$member is not a regular file"
+done
 
 "$BINARY" update check --manifest "$WORK/manifest.json" --signature "$WORK/manifest.sig"
 
@@ -118,14 +133,14 @@ EXPECTED_HASH=$(printf '%s' "$CHECK_JSON" | sed -n 's/.*"artifact":{[^}]*"sha256
 EXPECTED_SIZE=$(printf '%s' "$CHECK_JSON" | sed -n 's/.*"artifact":{[^}]*"size_bytes":\([0-9][0-9]*\).*/\1/p')
 [ -n "$EXPECTED_HASH" ] && [ -n "$EXPECTED_SIZE" ] || fail "cannot read verified artifact metadata"
 
-HASH=$(sha256sum "$WORK/$ARTIFACT" | cut -d' ' -f1)
-SIZE=$(wc -c < "$WORK/$ARTIFACT" | tr -d '[:space:]')
+HASH=$(sha256sum "$WORK/repairflow" | cut -d' ' -f1)
+SIZE=$(wc -c < "$WORK/repairflow" | tr -d '[:space:]')
 [ "$HASH" = "$EXPECTED_HASH" ] || fail "artifact hash does not match the signed manifest"
 [ "$SIZE" = "$EXPECTED_SIZE" ] || fail "artifact size does not match the signed manifest"
 
 echo "update verified: $TAG (linux/$ARCH)"
 if [ "$APPLY" -eq 1 ]; then
-  "$BINARY" update apply --file "$WORK/$ARTIFACT" --manifest "$WORK/manifest.json" \
+  "$BINARY" update apply --file "$WORK/repairflow" --manifest "$WORK/manifest.json" \
     --signature "$WORK/manifest.sig" --confirm
   echo "restart the RepairFlow service, then run version and doctor"
 else

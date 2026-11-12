@@ -54,11 +54,16 @@ make build
 ./scripts/run-demo.sh
 ```
 
-A downloaded release bundle includes the same launcher, so it does not need Go:
+To try the demo without Go, initialize a temporary workspace explicitly:
 
 ```bash
-./run-demo.sh
+demo_home=$(mktemp -d)
+REPAIRFLOW_NEW_PASSWORD=repairflow repairflow --home "$demo_home" init --demo --demo-user demo
+repairflow --home "$demo_home" serve
 ```
+
+The explicit `--demo-user` is required for a usable login; without it the demo workspace has no
+account under `auth_required=true`. Remove `$demo_home` when finished.
 
 Open <http://127.0.0.1:8091/login> and sign in with:
 

@@ -224,8 +224,9 @@ Service installation supports systemd user units and OpenRC scripts. `--name` se
 instance; units belonging to another instance are not overwritten or removed.
 
 Updates use local files only and require Ed25519 signature and SHA-256 verification. The optional
-`scripts/update-github.sh` downloads one exact public GitHub release tag into temporary storage and
-then invokes these same local checks; it does not add an API, background polling or automatic restart.
+`scripts/update-github.sh` downloads one exact public GitHub release archive into temporary storage,
+rejects unsafe archive paths, extracts the signed manifest and binary, then invokes these same local
+checks; it does not add an API, background polling or automatic restart.
 `update apply` requires a signed release build with the trusted public key embedded. Regular-file,
 platform, version, size and hash checks are mandatory. Same-version installs, downgrades, symlinks and
 FIFOs are refused. Verified apply is Linux-only; restart through the service supervisor after success.

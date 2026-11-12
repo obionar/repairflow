@@ -15,12 +15,20 @@ scripts/release.sh --version X.Y.Z [--key /secure/release-signing.key] --out /fr
 ```
 
 The script refuses a dirty tree, a `-dev` version and an existing output directory. It builds
-`linux/amd64` and `linux/arm64`, writes `manifest.json`, optionally signs it and embeds the public
-key, verifies the manifest with a throwaway checker build, and writes `SHA256SUMS`. The bundle
-contains the two binaries, `README.md`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, a corresponding-source
-archive, `run-demo.sh`, `update-github.sh`, `manifest.json`, optional `manifest.sig` and `SHA256SUMS`. The checksum file
-covers every bundle member, including both legal files and source. `make license-check` must pass
-before packaging, so unknown licenses, stale notices and unreviewed assets block the release.
+`linux/amd64` and `linux/arm64`, writes a manifest naming the binary as `repairflow`, signs it, embeds
+the public key, verifies the manifest with a throwaway checker build, then writes exactly:
+
+```text
+repairflow_Linux_x86_64.tar.gz
+repairflow_Linux_arm64.tar.gz
+SHA256SUMS
+```
+
+Each archive contains only `repairflow`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, `manifest.json`,
+`manifest.sig` and `update-github.sh`; `SHA256SUMS` covers the two archives. Do not upload loose
+binaries, README, source archives, demo scripts or manifests as release assets. The GitHub-generated
+source archives at the tag satisfy source availability. `make license-check` must pass before
+packaging.
 
 Never put a private signing key, build output or release directory into git. Keep signing keys
 offline and out of the repository, chat and logs.
@@ -28,10 +36,12 @@ offline and out of the repository, chat and logs.
 ## Copy and verify
 
 ```bash
-scp repairflow-linux-amd64 SHA256SUMS technician@host:~/
+scp repairflow_Linux_x86_64.tar.gz SHA256SUMS technician@host:~/
 # on the target
 sha256sum -c SHA256SUMS --ignore-missing
-install -Dm0755 repairflow-linux-amd64 ~/.local/bin/repairflow
+tar -xzf repairflow_Linux_x86_64.tar.gz
+install -Dm0755 repairflow ~/.local/bin/repairflow
+install -Dm0755 update-github.sh ~/.local/bin/update-github.sh
 ~/.local/bin/repairflow version
 ```
 
@@ -89,14 +99,16 @@ Signed GitHub update (exact tag, check first, then apply):
 ./update-github.sh --tag X.Y.Z --binary "$HOME/.local/bin/repairflow" --apply
 ```
 
-The POSIX script uses `wget` or `curl`, verifies the signed manifest and artifact hash/size, and
-leaves service restart to the operator. The release bundle includes it beside the binaries.
+The POSIX script downloads the exact architecture archive, rejects unsafe paths, verifies the signed
+manifest and artifact hash/size, and leaves service restart to the operator. Install the archive's
+`update-github.sh` beside the binary. Use `tar -xzf repairflow_Linux_x86_64.tar.gz` for offline
+updates; the extracted files are `manifest.json`, `manifest.sig` and `repairflow`.
 
 Signed offline update:
 
 ```bash
 repairflow update check --manifest manifest.json --signature manifest.sig
-repairflow update apply --file repairflow-linux-amd64 --manifest manifest.json \
+repairflow update apply --file repairflow --manifest manifest.json \
   --signature manifest.sig --confirm
 repairflow service install          # re-pin the unit if the path changed
 repairflow doctor

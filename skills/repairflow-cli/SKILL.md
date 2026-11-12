@@ -47,8 +47,9 @@ loopback.
 - `backup create --output ABS/PATH`, `backup verify`, `restore` into an empty/new workspace only.
 - Updates use signed manifests: `update check/apply/keygen/sign`. `update apply --file`
   requires a regular local artifact; symlinks and FIFOs are refused. Signed apply is Linux-only.
-  `scripts/update-github.sh` optionally downloads an exact public GitHub release tag and reuses that
-  verification path; it does not poll or restart services automatically.
+  `scripts/update-github.sh` optionally downloads the exact architecture archive for a public GitHub
+  release tag and reuses that verification path; it rejects unsafe archive paths and does not poll or
+  restart services automatically.
 - `service install/status/remove` writes a systemd user unit or, on Alpine, an OpenRC script
   (`--init systemd|openrc|none`). `--name NAME` manages a second instance; a unit marked for another
   instance is refused, not overwritten or removed.

@@ -14,19 +14,22 @@ Linux amd64 and arm64 are tested. Other platforms are not currently supported ta
 
 ## Install the executable
 
-### From a release bundle
+### From a release archive
 
-Choose `repairflow-linux-amd64` or `repairflow-linux-arm64`, then verify the downloaded files before
-installing:
+Download the archive for your architecture and `SHA256SUMS` from the GitHub release:
 
 ```bash
 sha256sum -c SHA256SUMS --ignore-missing
-install -Dm0755 repairflow-linux-amd64 ~/.local/bin/repairflow
+tar -xzf repairflow_Linux_x86_64.tar.gz
+install -Dm0755 repairflow ~/.local/bin/repairflow
+install -Dm0755 update-github.sh ~/.local/bin/update-github.sh
 ~/.local/bin/repairflow version
 ```
 
-Use the arm64 filename instead on an ARM64 machine. Keep the executable at a stable path: service
-units and offline updates refer to that location.
+Use `repairflow_Linux_arm64.tar.gz` on ARM64. The archive also contains `LICENSE`,
+`THIRD_PARTY_NOTICES.md`, `manifest.json` and `manifest.sig`; keep the archive or those files with
+the installation to preserve the license notices and support offline verification. Keep the
+executable at a stable path: service units and updates refer to that location.
 
 ### From source
 
@@ -47,11 +50,10 @@ The examples below use `repairflow` for readability.
 
 ## Try the disposable demo
 
-From either a source checkout or a release bundle:
+From a source checkout:
 
 ```bash
-./run-demo.sh                 # release bundle
-./scripts/run-demo.sh         # source checkout
+./scripts/run-demo.sh
 ```
 
 Open <http://127.0.0.1:8091/login> and use `demo` / `repairflow`. The launcher creates a temporary

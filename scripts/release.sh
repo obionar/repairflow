@@ -3,12 +3,16 @@
 #
 #   scripts/release.sh --version 0.1.0 [--key PATH] [--pub PATH] [--out DIR] [--channel stable]
 #
-# Produces dist/<version>/ with the linux/amd64 and linux/arm64 binaries,
-# LICENSE, generated third-party notices, corresponding source, demo and GitHub
-# update launchers, a manifest.json
-# in the format internal/update expects, an optional detached Ed25519 signature
-# and SHA256SUMS. Refuses a dirty worktree, a -dev version and an existing output
-# directory. Never prints key material.
+# Produces dist/<version>/ with exactly three release assets:
+#   repairflow_Linux_x86_64.tar.gz
+#   repairflow_Linux_arm64.tar.gz
+#   SHA256SUMS
+#
+# Each archive contains only the binary, LICENSE, THIRD_PARTY_NOTICES.md, the
+# signed manifest, manifest signature and update-github.sh. No loose binaries,
+# docs, demo launcher or source archive are published as release assets.
+# Refuses a dirty worktree, a -dev version and an existing output directory.
+# Never prints key material.
 #
 # Without --key the artifacts are unsigned: `update apply` stays disabled on
 # them by design (no embedded public key). With --key the public key is read
@@ -27,7 +31,7 @@ usage() {
 Usage: scripts/release.sh --version X.Y.Z [options]
 
   --version X.Y.Z   release version (no -dev suffix, no leading v)
-  --key PATH        Ed25519 private key written by `repairflow update keygen`
+  --key PATH        Ed25519 private key written by `repairflow update keygen` (required)
   --pub PATH        public key hex file (default: release-signing.pub beside --key)
   --out DIR         output directory (default: dist/<version>; must not exist)
   --channel NAME    release channel recorded in the manifest (default: stable)
@@ -93,61 +97,67 @@ if [ -n "$PUBHEX" ]; then
 fi
 
 echo "release: building $VERSION ($COMMIT) into $OUT"
+BUILD=$(mktemp -d "${TMPDIR:-/tmp}/repairflow-release.XXXXXX")
+cleanup() {
+  rm -rf "$BUILD"
+  if [ -n "${CHECK:-}" ]; then
+    rm -rf "$CHECK"
+  fi
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
 for arch in amd64 arm64; do
   CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags "$LDFLAGS" \
-    -o "$OUT/repairflow-linux-$arch" ./cmd/repairflow
+    -o "$BUILD/repairflow-$arch" ./cmd/repairflow
 done
-install -m 0644 README.md "$OUT/README.md"
-install -m 0644 LICENSE "$OUT/LICENSE"
-install -m 0644 THIRD_PARTY_NOTICES.md "$OUT/THIRD_PARTY_NOTICES.md"
-install -m 0755 scripts/run-demo.sh "$OUT/run-demo.sh"
-install -m 0755 scripts/update-github.sh "$OUT/update-github.sh"
-git archive --format=tar.gz --prefix="repairflow-$COMMIT/" \
-  -o "$OUT/repairflow-source-$COMMIT.tar.gz" HEAD
 
 # Minimal JSON writer: no jq dependency, no shell interpolation surprises.
-python3 - "$OUT" "$VERSION" "$CHANNEL" "$DATE" <<'PY'
+python3 - "$BUILD" "$VERSION" "$CHANNEL" "$DATE" <<'PY'
 import hashlib, json, os, sys
-out, version, channel, created = sys.argv[1:5]
+build, version, channel, created = sys.argv[1:5]
 artifacts = []
 for arch in ("amd64", "arm64"):
-    name = f"repairflow-linux-{arch}"
-    path = os.path.join(out, name)
+    path = os.path.join(build, f"repairflow-{arch}")
     digest = hashlib.sha256(open(path, "rb").read()).hexdigest()
-    artifacts.append({"os": "linux", "arch": arch, "file": name,
+    artifacts.append({"os": "linux", "arch": arch, "file": "repairflow",
                       "sha256": digest, "size_bytes": os.path.getsize(path)})
 manifest = {"format_version": 1, "channel": channel, "version": version,
             "created_at": created, "artifacts": artifacts}
-with open(os.path.join(out, "manifest.json"), "w") as fh:
+with open(os.path.join(build, "manifest.json"), "w") as fh:
     json.dump(manifest, fh, indent=2)
     fh.write("\n")
 PY
 
 if [ -n "$KEY" ]; then
-  "$OUT/repairflow-linux-amd64" update sign --key "$KEY" --manifest "$OUT/manifest.json" \
-    --out "$OUT/manifest.sig" >/dev/null
-  [ -s "$OUT/manifest.sig" ] || { echo "release: signing produced no signature" >&2; exit 1; }
+  "$BUILD/repairflow-amd64" update sign --key "$KEY" --manifest "$BUILD/manifest.json" \
+    --out "$BUILD/manifest.sig" >/dev/null
+  [ -s "$BUILD/manifest.sig" ] || { echo "release: signing produced no signature" >&2; exit 1; }
 
   # Prove the manifest is accepted by a binary that embeds the same public key.
-  check=$(mktemp -d)
-  trap 'rm -rf "$check"' EXIT
+  CHECK=$(mktemp -d)
   CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
     -ldflags "-X repairflow/internal/buildinfo.Version=0.0.1 -X repairflow/internal/buildinfo.PublicKey=$PUBHEX" \
-    -o "$check/repairflow-check" ./cmd/repairflow
-  if ! "$check/repairflow-check" update check --manifest "$OUT/manifest.json" \
-      --signature "$OUT/manifest.sig" --json | grep -q "\"new_version\":\"$VERSION\""; then
+    -o "$CHECK/repairflow-check" ./cmd/repairflow
+  if ! "$CHECK/repairflow-check" update check --manifest "$BUILD/manifest.json" \
+      --signature "$BUILD/manifest.sig" --json | grep -q "\"new_version\":\"$VERSION\""; then
     echo "release: the generated manifest was not accepted by the checker build" >&2
     exit 1
   fi
   echo "release: manifest verified against the embedded public key"
 else
-  echo "release: no --key given; artifacts are UNSIGNED and updates stay disabled on them"
+  echo "release: --key is required for a publishable update archive" >&2
+  exit 1
 fi
 
-( cd "$OUT" && sha256sum manifest.json repairflow-linux-amd64 repairflow-linux-arm64 README.md \
-    LICENSE THIRD_PARTY_NOTICES.md repairflow-source-$COMMIT.tar.gz run-demo.sh update-github.sh \
-    ${KEY:+manifest.sig} > SHA256SUMS && sha256sum -c SHA256SUMS >/dev/null )
-echo "release: SHA256SUMS written"
+scripts/package-release.sh \
+  --out "$OUT" \
+  --amd64 "$BUILD/repairflow-amd64" \
+  --arm64 "$BUILD/repairflow-arm64" \
+  --license LICENSE \
+  --notices THIRD_PARTY_NOTICES.md \
+  --manifest "$BUILD/manifest.json" \
+  --signature "$BUILD/manifest.sig" \
+  --update-script scripts/update-github.sh
 
 count=$(wc -l < "$OUT/SHA256SUMS")
-echo "release: PASS — $VERSION in $OUT ($count checksums)"
+echo "release: PASS — $VERSION in $OUT ($count installable archives)"

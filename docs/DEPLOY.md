@@ -15,17 +15,20 @@ a workspace between machines.
 
 ## Copy and install
 
-Copy the release files to the target, then verify and install the appropriate binary:
+Copy the archive for the target architecture and `SHA256SUMS`, then verify and extract it:
 
 ```bash
 sha256sum -c SHA256SUMS --ignore-missing
-install -Dm0755 repairflow-linux-amd64 ~/.local/bin/repairflow
+tar -xzf repairflow_Linux_x86_64.tar.gz
+install -Dm0755 repairflow ~/.local/bin/repairflow
+install -Dm0755 update-github.sh ~/.local/bin/update-github.sh
 ~/.local/bin/repairflow version
 ```
 
-Use `repairflow-linux-arm64` on ARM64. Follow [Install and first run](INSTALL.md) to initialize a
-new workspace and create the first admin. To move existing records instead, use
-[Move a workspace](#move-a-workspace) below.
+Use `repairflow_Linux_arm64.tar.gz` on ARM64. Keep `LICENSE`, `THIRD_PARTY_NOTICES.md`,
+`manifest.json` and `manifest.sig` from the archive with the installation. Follow
+[Install and first run](INSTALL.md) to initialize a new workspace and create the first admin. To
+move existing records instead, use [Move a workspace](#move-a-workspace) below.
 
 ## Reach the web interface remotely
 
@@ -171,9 +174,10 @@ Always create and verify a backup first.
 
 ### Signed GitHub update
 
-After a verified backup, `update-github.sh` downloads one exact release tag from the public
-`obionar/repairflow` repository. It selects the current Linux architecture, verifies the signed
-manifest plus artifact SHA-256/size, and does not change the installation by default:
+After a verified backup, `update-github.sh` downloads the installable archive for the exact release
+tag from the public `obionar/repairflow` repository. It selects the current Linux architecture,
+extracts the signed manifest and binary, verifies the signature plus artifact SHA-256/size, and does
+not change the installation by default:
 
 ```bash
 ./update-github.sh --tag X.Y.Z --binary "$HOME/.local/bin/repairflow"
@@ -185,18 +189,19 @@ Apply only the reviewed candidate:
 ./update-github.sh --tag X.Y.Z --binary "$HOME/.local/bin/repairflow" --apply
 ```
 
-The script requires `wget` or `curl` and `sha256sum`. It performs network access only when invoked,
-uses no GitHub API or `jq`, and removes temporary downloads on success or failure. `--apply` reuses
-the installed binary's signed update path and preserves `<executable>.prev`. Restart and verify the
-service separately.
+The script requires `wget` or `curl`, `tar` and `sha256sum`. It performs network access only when
+invoked, uses no GitHub API or `jq`, and removes temporary downloads on success or failure. `--apply`
+reuses the installed binary's signed update path and preserves `<executable>.prev`. Restart and
+verify the service separately.
 
 ### Signed offline update
 
-A signed release includes a manifest, signature and architecture-specific binary:
+A signed release archive contains `manifest.json`, `manifest.sig` and the `repairflow` binary:
 
 ```bash
+tar -xzf repairflow_Linux_x86_64.tar.gz
 repairflow update check --manifest manifest.json --signature manifest.sig
-repairflow update apply --file repairflow-linux-amd64 \
+repairflow update apply --file repairflow \
   --manifest manifest.json --signature manifest.sig --confirm
 ```
 
@@ -222,7 +227,7 @@ Stop the service and replace the executable. If the executable path changed, rer
 ```bash
 # systemd
 systemctl --user stop repairflow.service
-install -Dm0755 repairflow-linux-amd64 ~/.local/bin/repairflow
+install -Dm0755 repairflow ~/.local/bin/repairflow
 # If the path changed: repairflow service install --no-enable
 systemctl --user start repairflow.service
 

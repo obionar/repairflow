@@ -118,10 +118,10 @@ make license-check
 After changing dependencies or reviewed assets, regenerate `THIRD_PARTY_NOTICES.md` with
 `make licenses` and commit the result. New static/media assets must be reviewed and recorded in
 `licenses/first-party-assets.txt`. Unknown licenses, missing notices and unreviewed assets fail the
-check. Release bundles include `LICENSE`, `THIRD_PARTY_NOTICES.md` and a corresponding-source
-archive; every bundle member is covered by `SHA256SUMS`. The release script refuses a missing or
-stale inventory. The browser-test-only module is reported separately under `dist/licenses/` and is
-not bundled with the application.
+check. Release archives include `LICENSE`, `THIRD_PARTY_NOTICES.md`, the signed manifest, the binary
+and `update-github.sh`; `SHA256SUMS` covers the platform archives. The release script refuses a
+missing or stale inventory. The browser-test-only module is reported separately under
+`dist/licenses/` and is not bundled with the application.
 
 ## Debugging
 

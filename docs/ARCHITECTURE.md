@@ -116,8 +116,9 @@ Updates authenticate and verify the artifact before installation. The updater re
 files, stages and re-hashes `<executable>.new`, preserves `<executable>.prev`, verifies the published
 target and health-checks the verified bytes. Replacement or health-check failure rolls back. Verified
 apply is Linux-only; unsigned builds and downgrades are refused. The optional
-`scripts/update-github.sh` only downloads an exact GitHub release tag and hands the local files to
-this same path; the application performs no background update checks.
+`scripts/update-github.sh` downloads and safely extracts the exact architecture archive for a GitHub
+release tag, then hands the verified local binary and signed manifest to this same path; the
+application performs no background update checks.
 
 Errors use stable codes from `internal/errs`. Expected validation, permission, conflict and
 not-found failures remain distinct from internal errors. Optional structured diagnostics and HTTP

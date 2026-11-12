@@ -42,8 +42,9 @@ before storing sensitive customer data.
   version checks, staged/published readback and a health check. Symlinks, FIFOs, unsigned builds,
   same-version installs and downgrades are refused.
 - The application makes no outbound network requests during ordinary use. The optional
-  `scripts/update-github.sh` accesses GitHub only when the operator invokes it; signature and hash
-  verification still occur through the installed binary before an update is applied.
+  `scripts/update-github.sh` accesses GitHub only when the operator invokes it, extracts only the
+  expected files from the platform archive, and still requires the installed binary to verify the
+  signed manifest and hash before applying an update.
 
 ## Trust boundaries
 

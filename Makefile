@@ -50,8 +50,8 @@ licenses:
 license-check:
 	python3 scripts/license_inventory.py check
 
-# Publishable release directory (scripts/release.sh). Pass KEY=/path/to/release-signing.key
-# to embed the public key and sign the manifest; without it the artifacts are unsigned.
+# Publishable release archives (scripts/release.sh). KEY is required to embed the
+# public key and sign the manifest; unsigned publishable releases are refused.
 release:
 	VERSION=$(VERSION) bash scripts/release.sh --version $(VERSION) $(if $(KEY),--key $(KEY),)
 
