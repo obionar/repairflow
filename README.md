@@ -12,6 +12,22 @@ at your disposal. RepairFlow requires no cloud account, database server, telemet
 outbound network connection. If you choose to use an AI agent, it can work through the CLI; no AI
 service is built in or required.
 
+## A look at the interface
+
+Screenshots from the demo workspace (`init --demo`), which carries entirely synthetic records.
+
+![Dashboard with today's queues](docs/screenshots/dashboard.png)
+
+![Repair list with search, stage and customer columns](docs/screenshots/repairs.png)
+
+![One repair: stage controls, work log, parts, estimates and audit activity](docs/screenshots/repair-detail.png)
+
+<p align="center">
+  <img src="docs/screenshots/repairs-mobile.png" width="300" alt="Repair list on a phone">
+</p>
+
+The new-repair form with the customer picker: [docs/screenshots/repair-new.png](docs/screenshots/repair-new.png).
+
 ## What it does
 
 - Tracks customers, devices and repairs, including repairs not yet assigned to a customer.

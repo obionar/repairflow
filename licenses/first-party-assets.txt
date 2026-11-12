@@ -6,3 +6,8 @@ internal/web/static/favicon.svg
 internal/web/static/livesearch.js
 internal/web/static/navigation.js
 internal/web/static/panels.js
+docs/screenshots/dashboard.png
+docs/screenshots/repair-detail.png
+docs/screenshots/repair-new.png
+docs/screenshots/repairs.png
+docs/screenshots/repairs-mobile.png
