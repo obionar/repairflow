@@ -22,7 +22,8 @@ service is built in or required.
 - Stores original attachments with SHA-256 hashes, captions, galleries and links to log entries.
 - Separates pickup from repair stage and archives old records without destroying their history.
 - Provides admin, technician and viewer accounts for the web interface.
-- Creates verified backup archives and supports signed offline binary updates.
+- Creates verified backup archives and supports signed binary updates, with an optional GitHub
+  download script.
 - Runs as a foreground process, a systemd user service or an OpenRC service.
 
 RepairFlow does **not** provide payment accounting, stock control, tax invoices, cloud sync or

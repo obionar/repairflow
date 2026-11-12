@@ -12,8 +12,9 @@ func TestReleaseGateIncludesLicenseInventoryAndNotices(t *testing.T) {
 			"license_inventory.py check",
 			`install -m 0644 LICENSE "$OUT/LICENSE"`,
 			`install -m 0644 THIRD_PARTY_NOTICES.md "$OUT/THIRD_PARTY_NOTICES.md"`,
+			`install -m 0755 scripts/update-github.sh "$OUT/update-github.sh"`,
 			`repairflow-source-$COMMIT.tar.gz`,
-			`LICENSE THIRD_PARTY_NOTICES.md repairflow-source-$COMMIT.tar.gz`,
+			`LICENSE THIRD_PARTY_NOTICES.md repairflow-source-$COMMIT.tar.gz run-demo.sh update-github.sh`,
 		},
 		"verify-all.sh": {
 			"step_license_inventory",

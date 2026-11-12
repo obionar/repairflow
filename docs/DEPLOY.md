@@ -169,6 +169,27 @@ contains customer data, attachments and password hashes and is not encrypted.
 
 Always create and verify a backup first.
 
+### Signed GitHub update
+
+After a verified backup, `update-github.sh` downloads one exact release tag from the public
+`obionar/repairflow` repository. It selects the current Linux architecture, verifies the signed
+manifest plus artifact SHA-256/size, and does not change the installation by default:
+
+```bash
+./update-github.sh --tag X.Y.Z --binary "$HOME/.local/bin/repairflow"
+```
+
+Apply only the reviewed candidate:
+
+```bash
+./update-github.sh --tag X.Y.Z --binary "$HOME/.local/bin/repairflow" --apply
+```
+
+The script requires `wget` or `curl` and `sha256sum`. It performs network access only when invoked,
+uses no GitHub API or `jq`, and removes temporary downloads on success or failure. `--apply` reuses
+the installed binary's signed update path and preserves `<executable>.prev`. Restart and verify the
+service separately.
+
 ### Signed offline update
 
 A signed release includes a manifest, signature and architecture-specific binary:

@@ -65,6 +65,10 @@ python3 tests/hostile_cli.py ./repairflow /tmp/repairflow-hostile
 
 Use fresh directories for those scripts. Do not point them at an existing workspace.
 
+The update-script tests build real signed binaries and exercise GitHub-download check/apply, refusal
+cleanup and rollback preservation against a local HTTP fixture. They do not contact GitHub or a live
+service.
+
 Visual changes also require real browser review at mobile and desktop widths, keyboard and
 no-JavaScript workflows, and an accessibility check on the affected pages. A template assertion or
 HTTP 200 response alone does not verify the UI.

@@ -204,7 +204,7 @@ Backup output must be absolute and outside the source workspace. Restore targets
 workspace only. Archives contain a consistent database snapshot, configuration and hash-verified
 original attachments; they are not encrypted.
 
-## Services and offline updates
+## Services and updates
 
 ```text
 service install [--init systemd|openrc|none] [--name NAME] [--no-enable]
@@ -223,10 +223,12 @@ help
 Service installation supports systemd user units and OpenRC scripts. `--name` selects an independent
 instance; units belonging to another instance are not overwritten or removed.
 
-Updates use local files only and require Ed25519 signature and SHA-256 verification. `update apply`
-requires a signed release build with the trusted public key embedded. Regular-file, platform,
-version, size and hash checks are mandatory. Same-version installs, downgrades, symlinks and FIFOs
-are refused. Verified apply is Linux-only; restart through the service supervisor after success.
+Updates use local files only and require Ed25519 signature and SHA-256 verification. The optional
+`scripts/update-github.sh` downloads one exact public GitHub release tag into temporary storage and
+then invokes these same local checks; it does not add an API, background polling or automatic restart.
+`update apply` requires a signed release build with the trusted public key embedded. Regular-file,
+platform, version, size and hash checks are mandatory. Same-version installs, downgrades, symlinks and
+FIFOs are refused. Verified apply is Linux-only; restart through the service supervisor after success.
 
 ## JSON output
 

@@ -18,7 +18,7 @@ The script refuses a dirty tree, a `-dev` version and an existing output directo
 `linux/amd64` and `linux/arm64`, writes `manifest.json`, optionally signs it and embeds the public
 key, verifies the manifest with a throwaway checker build, and writes `SHA256SUMS`. The bundle
 contains the two binaries, `README.md`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, a corresponding-source
-archive, `run-demo.sh`, `manifest.json`, optional `manifest.sig` and `SHA256SUMS`. The checksum file
+archive, `run-demo.sh`, `update-github.sh`, `manifest.json`, optional `manifest.sig` and `SHA256SUMS`. The checksum file
 covers every bundle member, including both legal files and source. `make license-check` must pass
 before packaging, so unknown licenses, stale notices and unreviewed assets block the release.
 
@@ -82,7 +82,17 @@ A restore targets an empty/new workspace and verifies structure, hashes, schema 
 references before publishing. Keep archives on separate storage; they contain customer data and
 password hashes and are not encrypted by the application.
 
-Signed upgrade:
+Signed GitHub update (exact tag, check first, then apply):
+
+```bash
+./update-github.sh --tag X.Y.Z --binary "$HOME/.local/bin/repairflow"
+./update-github.sh --tag X.Y.Z --binary "$HOME/.local/bin/repairflow" --apply
+```
+
+The POSIX script uses `wget` or `curl`, verifies the signed manifest and artifact hash/size, and
+leaves service restart to the operator. The release bundle includes it beside the binaries.
+
+Signed offline update:
 
 ```bash
 repairflow update check --manifest manifest.json --signature manifest.sig

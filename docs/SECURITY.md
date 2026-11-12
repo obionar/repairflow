@@ -38,10 +38,12 @@ before storing sensitive customer data.
   links protect original bytes across the database commit.
 - Backup creation and restore verify database and attachment integrity. Restore never overwrites an
   existing workspace.
-- Signed offline updates require Ed25519 and SHA-256 verification, regular files, platform and
+- Signed updates require Ed25519 and SHA-256 verification, regular files, platform and
   version checks, staged/published readback and a health check. Symlinks, FIFOs, unsigned builds,
   same-version installs and downgrades are refused.
-- The application makes no outbound network requests and runs no remote update scripts.
+- The application makes no outbound network requests during ordinary use. The optional
+  `scripts/update-github.sh` accesses GitHub only when the operator invokes it; signature and hash
+  verification still occur through the installed binary before an update is applied.
 
 ## Trust boundaries
 

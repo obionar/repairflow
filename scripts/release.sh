@@ -4,7 +4,8 @@
 #   scripts/release.sh --version 0.1.0 [--key PATH] [--pub PATH] [--out DIR] [--channel stable]
 #
 # Produces dist/<version>/ with the linux/amd64 and linux/arm64 binaries,
-# LICENSE, generated third-party notices, corresponding source, a manifest.json
+# LICENSE, generated third-party notices, corresponding source, demo and GitHub
+# update launchers, a manifest.json
 # in the format internal/update expects, an optional detached Ed25519 signature
 # and SHA256SUMS. Refuses a dirty worktree, a -dev version and an existing output
 # directory. Never prints key material.
@@ -100,6 +101,7 @@ install -m 0644 README.md "$OUT/README.md"
 install -m 0644 LICENSE "$OUT/LICENSE"
 install -m 0644 THIRD_PARTY_NOTICES.md "$OUT/THIRD_PARTY_NOTICES.md"
 install -m 0755 scripts/run-demo.sh "$OUT/run-demo.sh"
+install -m 0755 scripts/update-github.sh "$OUT/update-github.sh"
 git archive --format=tar.gz --prefix="repairflow-$COMMIT/" \
   -o "$OUT/repairflow-source-$COMMIT.tar.gz" HEAD
 
@@ -143,7 +145,7 @@ else
 fi
 
 ( cd "$OUT" && sha256sum manifest.json repairflow-linux-amd64 repairflow-linux-arm64 README.md \
-    LICENSE THIRD_PARTY_NOTICES.md repairflow-source-$COMMIT.tar.gz run-demo.sh \
+    LICENSE THIRD_PARTY_NOTICES.md repairflow-source-$COMMIT.tar.gz run-demo.sh update-github.sh \
     ${KEY:+manifest.sig} > SHA256SUMS && sha256sum -c SHA256SUMS >/dev/null )
 echo "release: SHA256SUMS written"
 
