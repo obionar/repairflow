@@ -1,0 +1,24 @@
+{{template "head" .}}
+<h1 id="customer-new-heading" class="sr-only">{{$.Tr "customer_new.title"}}</h1>
+{{template "flash" .}}
+
+<details class="panel fold-panel" id="new-customer" open>
+  <summary class="section-heading"><h2>{{$.Tr "customer_new.title"}}</h2></summary>
+  <div class="panel-body">
+  <form id="customer-form" class="record-form" method="post" action="/customers/new">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <div class="fields">
+      <div class="field"><label for="name">{{$.Tr "common.name"}}</label><input id="name" name="name" value="{{.Data.Form.Name}}" required maxlength="200" autocomplete="name"></div>
+      <div class="field"><label for="phone">{{$.Tr "common.phone"}}</label><input id="phone" name="phone" type="tel" value="{{.Data.Form.Phone}}" maxlength="100" autocomplete="tel"></div>
+      <div class="field"><label for="email">{{$.Tr "common.email"}}</label><input id="email" name="email" type="email" value="{{.Data.Form.Email}}" maxlength="200" autocomplete="email"></div>
+      <div class="field"><label for="address">{{$.Tr "common.address"}}</label><input id="address" name="address" value="{{.Data.Form.Address}}" maxlength="300" autocomplete="street-address"></div>
+      <div class="field"><label for="notes">{{$.Tr "common.notes"}}</label><textarea id="notes" name="notes" rows="3" maxlength="5000">{{.Data.Form.Notes}}</textarea></div>
+    </div>
+    <div class="form-actions">
+      <button class="primary" type="submit" id="customer-submit">{{$.Tr "customer_new.create"}}</button>
+      <a class="button quiet" href="/customers">{{$.Tr "common.cancel"}}</a>
+    </div>
+  </form>
+  </div>
+</details>
+{{template "tail" .}}

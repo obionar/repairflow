@@ -1,0 +1,8 @@
+# First-party static assets reviewed for redistribution.
+# New or removed assets deliberately fail `make license-check` until this list is updated.
+internal/web/static/app.css
+internal/web/static/customer-picker.js
+internal/web/static/favicon.svg
+internal/web/static/livesearch.js
+internal/web/static/navigation.js
+internal/web/static/panels.js

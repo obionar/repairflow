@@ -1,0 +1,17 @@
+{{template "head" .}}
+<h1 id="login-heading" class="sr-only">{{$.Tr "login.title"}}</h1>
+
+<details class="panel fold-panel" id="operator-login" open>
+  <summary class="section-heading"><h2>{{$.Tr "login.heading"}}</h2></summary>
+  <div class="panel-body">
+  {{template "flash" .}}
+  <form id="login-form" class="record-form" method="post" action="/login">
+    <div class="fields">
+      <div class="field"><label for="username">{{$.Tr "login.username"}}</label><input id="username" name="username" required maxlength="64" autocomplete="username" autocapitalize="none" spellcheck="false"></div>
+      <div class="field"><label for="password">{{$.Tr "login.password"}}</label><input id="password" name="password" type="password" required autocomplete="current-password"></div>
+    </div>
+    <div class="form-actions"><button class="primary" type="submit" id="login-submit">{{$.Tr "login.submit"}}</button></div>
+  </form>
+  </div>
+</details>
+{{template "tail" .}}

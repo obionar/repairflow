@@ -1,0 +1,37 @@
+{{template "head" .}}
+<h1 id="settings-heading" class="sr-only">{{$.Tr "settings.title"}}</h1>
+{{template "flash" .}}
+
+<details class="panel fold-panel" id="settings-password">
+  <summary class="section-heading"><h2>{{$.Tr "settings.password_heading"}}</h2></summary>
+  <div class="panel-body">
+  <p class="muted">{{$.Tr "settings.signed_in" .Session.Username}}</p>
+  <form id="password-form" class="record-form" method="post" action="/settings/password">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <div class="fields">
+      <div class="field"><label for="current_password">{{$.Tr "settings.current"}}</label><input id="current_password" name="current_password" type="password" required autocomplete="current-password"></div>
+      <div class="field"><label for="new_password">{{$.Tr "settings.new"}}</label><input id="new_password" name="new_password" type="password" required minlength="6" autocomplete="new-password"></div>
+      <div class="field"><label for="confirm_password">{{$.Tr "settings.confirm"}}</label><input id="confirm_password" name="confirm_password" type="password" required minlength="6" autocomplete="new-password"></div>
+    </div>
+    <div class="form-actions"><button class="primary" type="submit" id="password-submit">{{$.Tr "settings.change"}}</button></div>
+    <p class="muted">{{$.Tr "settings.password_hint"}}</p>
+  </form>
+  </div>
+</details>
+<details class="panel fold-panel" id="settings-language">
+  <summary class="section-heading"><h2>{{$.Tr "settings.language_heading"}}</h2></summary>
+  <div class="panel-body">
+  <form id="language-form" class="record-form" method="post" action="/settings/language">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <div class="fields">
+      <div class="field"><label for="language">{{$.Tr "settings.language_label"}}</label>
+        <select id="language" name="language">
+          {{range .Languages}}<option value="{{.Code}}"{{if eq .Code $.Lang}} selected{{end}}>{{.Name}}</option>{{end}}
+        </select></div>
+    </div>
+    <div class="form-actions"><button class="primary" type="submit" id="language-submit">{{$.Tr "settings.language_save"}}</button></div>
+    <p class="muted">{{$.Tr "settings.language_hint"}}</p>
+  </form>
+  </div>
+</details>
+{{template "tail" .}}

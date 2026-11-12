@@ -1,0 +1,95 @@
+{{template "head" .}}
+<h1 id="customer-heading" class="sr-only">{{.Data.Customer.Name}}</h1>
+{{template "flash" .}}
+
+<details class="panel fold-panel customer-record" open>
+  <summary class="section-heading">
+    <h2>{{$.Tr "customer.heading" .Data.Customer.ID}}</h2>
+  </summary>
+  <div class="panel-body">
+    {{if .Data.Form.Conflict}}
+    <details class="conflict-review" open>
+      <summary>{{$.Tr "common.conflict_summary"}}</summary>
+      <dl class="detail-list">
+        <div><dt>Name</dt><dd>{{.Data.Customer.Name}}</dd></div>
+        <div><dt>Phone</dt><dd>{{or .Data.Customer.Phone "—"}}</dd></div>
+        <div><dt>Email</dt><dd>{{or .Data.Customer.Email "—"}}</dd></div>
+        <div><dt>Address</dt><dd>{{or .Data.Customer.Address "—"}}</dd></div>
+        <div><dt>Notes</dt><dd>{{or .Data.Customer.Notes "—"}}</dd></div>
+      </dl>
+    </details>
+    {{end}}
+    <p class="panel-subtitle meta-row">
+      <span><time datetime="{{.Data.Customer.CreatedAt}}">{{$.Tr "customer.since" (when .Data.Customer.CreatedAt)}}</time></span>
+      {{if .Data.Customer.ArchivedAt}}<span class="stage">{{$.Tr "common.archived"}} <time datetime="{{.Data.Customer.ArchivedAt}}">{{date .Data.Customer.ArchivedAt}}</time></span>{{end}}
+      <span class="section-links"><a href="/customers">{{$.Tr "customer.all"}}</a> · <a href="#customer-history">{{$.Tr "customer.history"}}</a></span>
+    </p>
+    {{if .Session.CanWrite}}
+    <form id="customer-form" class="record-form" method="post" action="/customers/{{.Data.Customer.ID}}">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <input type="hidden" name="revision" value="{{.Data.Form.Revision}}">
+      <div class="fields">
+        <div class="field"><label for="name">{{$.Tr "common.name"}}</label><input id="name" name="name" value="{{.Data.Form.Name}}" required maxlength="200" autocomplete="name"></div>
+        <div class="field"><label for="phone">{{$.Tr "common.phone"}}</label><input id="phone" name="phone" type="tel" value="{{.Data.Form.Phone}}" maxlength="100" autocomplete="tel"></div>
+        <div class="field"><label for="email">{{$.Tr "common.email"}}</label><input id="email" name="email" type="email" value="{{.Data.Form.Email}}" maxlength="200" autocomplete="email"></div>
+        <div class="field"><label for="address">{{$.Tr "common.address"}}</label><input id="address" name="address" value="{{.Data.Form.Address}}" maxlength="300" autocomplete="street-address"></div>
+        <div class="field"><label for="notes">{{$.Tr "common.notes"}}</label><textarea id="notes" name="notes" rows="3" maxlength="5000">{{.Data.Form.Notes}}</textarea></div>
+      </div>
+      <div class="form-actions">
+        <button class="primary" type="submit" id="customer-save">{{$.Tr "common.save"}}</button>
+        <a class="button quiet" href="/repairs/new?customer_id={{.Data.Customer.ID}}">{{template "icon-plus"}}{{$.Tr "common.new_repair"}}</a>
+      </div>
+    </form>
+    {{else}}
+    <dl class="detail-list">
+      <div><dt>Name</dt><dd>{{.Data.Customer.Name}}</dd></div>
+      <div><dt>Phone</dt><dd>{{or .Data.Customer.Phone "—"}}</dd></div>
+      <div><dt>Email</dt><dd>{{or .Data.Customer.Email "—"}}</dd></div>
+      <div><dt>Notes</dt><dd>{{or .Data.Customer.Notes "—"}}</dd></div>
+    </dl>
+    {{end}}
+    {{if .Session.CanWrite}}
+    <div class="record-secondary">
+      {{if .Data.Customer.ArchivedAt}}
+      <form method="post" action="/customers/{{.Data.Customer.ID}}/unarchive" id="customer-unarchive-form">
+        <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+        <button class="quiet" type="submit" id="customer-unarchive">{{$.Tr "customer.unarchive"}}</button>
+      </form>
+      {{else}}
+      <form method="post" action="/customers/{{.Data.Customer.ID}}/archive" id="customer-archive-form">
+        <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+        <button class="quiet" type="submit" id="customer-archive">{{$.Tr "customer.archive"}}</button>
+      </form>
+      {{end}}
+    </div>
+    {{end}}
+  </div>
+</details>
+
+<section class="panel table-window">
+  <div class="section-heading"><h2>{{$.Tr "customer.repairs_heading"}}</h2></div>
+  {{if .Data.Repairs.Items}}
+  <div class="table-wrap" tabindex="0" role="region" aria-label="{{$.Tr "customer.repairs_aria" .Data.Customer.Name}}">
+    <table id="customer-tickets">
+      <thead><tr><th scope="col">{{$.Tr "common.device"}}</th><th scope="col">{{$.Tr "common.status"}}</th><th scope="col">{{$.Tr "common.created"}}</th></tr></thead>
+      <tbody>{{range .Data.Repairs.Items}}<tr>
+        <td data-label="{{$.Tr "common.device"}}"><a class="record-link" href="/repairs/{{.ID}}"><span class="record-id">#{{.ID}}</span> <span class="record-title">{{.Device}}</span></a><span class="issue-line">{{.Issue}}</span></td>
+        <td data-label="{{$.Tr "common.status"}}"><span class="stage {{.Stage}}">{{$.Tr (printf "stage.%s" .Stage)}}</span></td>
+        <td data-label="{{$.Tr "common.created"}}"><time datetime="{{.CreatedAt}}">{{date .CreatedAt}}</time></td>
+      </tr>{{end}}</tbody>
+    </table>
+  </div>
+  {{else}}<div class="window-content"><p class="muted">{{$.Tr "customer.no_repairs"}}</p></div>{{end}}
+</section>
+
+<details class="panel fold-panel" id="customer-history">
+  <summary class="section-heading"><h2>{{$.Tr "customer.history"}}</h2></summary>
+  <div class="panel-body">
+    {{if .Data.History}}
+    <ol class="history-list">{{range .Data.History}}
+      <li><time datetime="{{.CreatedAt}}">{{when .CreatedAt}}</time> <strong>{{$.Act .Action}}</strong> — {{detail .Detail}}</li>
+    {{end}}</ol>
+    {{else}}<p class="muted">{{$.Tr "customer.no_history"}}</p>{{end}}
+  </div>
+</details>
+{{template "tail" .}}

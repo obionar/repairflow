@@ -1,0 +1,409 @@
+{{template "head" .}}
+<h1 id="ticket-heading" class="sr-only">{{$.Tr "repair.heading" .Data.Repair.ID}} — {{.Data.Repair.Device}}</h1>
+{{template "flash" .}}
+
+<details class="panel fold-panel repair-device" id="device-details" open>
+  <summary class="section-heading">
+    <h2>{{$.Tr "repair.heading" .Data.Repair.ID}}</h2>
+  </summary>
+  <div class="panel-body">
+  <p class="ticket-meta">
+    <span class="stage {{.Data.Repair.Stage}}" aria-hidden="true">{{$.Tr (printf "stage.%s" .Data.Repair.Stage)}}</span>
+    <span id="ticket-stage" class="sr-only">{{.Data.Repair.Stage}}</span>
+    <span>{{$.Tr "common.customer"}} {{if .Data.Repair.Unassigned}}<span class="muted">{{$.Tr "common.unassigned"}}</span>{{else}}<a href="/customers/{{.Data.Repair.CustomerID}}">{{.Data.Repair.CustomerName}}</a>{{end}}</span>
+    <span>{{$.Tr "repair.opened"}} <time datetime="{{.Data.Repair.CreatedAt}}">{{date .Data.Repair.CreatedAt}}</time></span>
+    {{if .Data.Repair.ArchivedAt}}<span class="stage">{{$.Tr "common.archived"}} <time datetime="{{.Data.Repair.ArchivedAt}}">{{date .Data.Repair.ArchivedAt}}</time></span>{{end}}
+  </p>
+
+  {{if .Data.Form.Conflict}}
+  <details class="conflict-review" open>
+    <summary>{{$.Tr "common.conflict_summary"}}</summary>
+    <dl class="detail-list">
+      <div><dt>{{$.Tr "common.device"}}</dt><dd>{{.Data.Repair.Device}}</dd></div>
+      <div><dt>{{$.Tr "repair_new.device_type"}}</dt><dd>{{.Data.Repair.DeviceType}}</dd></div>
+      <div><dt>{{$.Tr "repair_new.brand"}}</dt><dd>{{or .Data.Repair.Brand "—"}}</dd></div>
+      <div><dt>{{$.Tr "repair_new.model"}}</dt><dd>{{or .Data.Repair.Model "—"}}</dd></div>
+      <div><dt>{{$.Tr "repair_new.serial"}}</dt><dd>{{or .Data.Repair.Serial "—"}}</dd></div>
+      <div><dt>{{$.Tr "repair_new.issue"}}</dt><dd class="verbatim">{{.Data.Repair.Issue}}</dd></div>
+      <div><dt>{{$.Tr "common.notes"}}</dt><dd>{{or .Data.Repair.Notes "—"}}</dd></div>
+    </dl>
+  </details>
+  {{end}}
+
+  {{if .Session.CanWrite}}
+  <form id="ticket-details-form" class="record-form" method="post" action="/repairs/{{.Data.Repair.ID}}">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <input type="hidden" name="revision" value="{{.Data.Form.Revision}}">
+    <div class="fields">
+      <div class="field"><label for="customer_name">{{$.Tr "common.customer"}}</label>
+        <input id="customer_name" name="customer_name" list="customer-options" value="{{.Data.Form.CustomerName}}" autocomplete="off" data-customer-autocomplete placeholder="{{$.Tr "repair_new.customer_placeholder"}}">
+        <input type="hidden" id="customer_id" name="customer_id" value="{{if .Data.Form.CustomerID}}{{.Data.Form.CustomerID}}{{end}}">
+        <datalist id="customer-options">{{range .Data.Customers.Items}}<option data-id="{{.ID}}" value="{{.Name}}"></option>{{end}}</datalist>
+        <p class="field-hint">{{$.Tr "repair_new.customer_hint"}}</p>
+      </div>
+      <div class="field"><label for="device">{{$.Tr "repair_new.device_type"}}</label><input id="device" name="device" value="{{.Data.Form.Device}}" required maxlength="300"></div>
+      <div class="field"><label for="brand">{{$.Tr "repair_new.brand"}}</label><input id="brand" name="brand" value="{{.Data.Form.Brand}}" maxlength="200"></div>
+      <div class="field"><label for="model">{{$.Tr "repair_new.model"}}</label><input id="model" name="model" value="{{.Data.Form.Model}}" maxlength="200"></div>
+      <div class="field"><label for="serial">{{$.Tr "repair_new.serial"}}</label><input id="serial" name="serial" value="{{.Data.Form.Serial}}" maxlength="200"></div>
+      <div class="field"><label for="notes">{{$.Tr "common.notes"}}</label><textarea id="notes" name="notes" rows="2" maxlength="5000">{{.Data.Form.Notes}}</textarea></div>
+      <div class="field field-full"><label for="issue">{{$.Tr "repair_new.issue"}}</label><textarea id="issue" name="issue" rows="3" required maxlength="5000">{{.Data.Form.Issue}}</textarea></div>
+    </div>
+    <div class="form-actions"><button class="primary" type="submit" id="details-save">{{$.Tr "repair.save_details"}}</button></div>
+  </form>
+  {{else}}
+  <dl class="detail-list">
+    <div><dt>{{$.Tr "common.device"}}</dt><dd>{{.Data.Repair.Device}}</dd></div>
+    <div><dt>{{$.Tr "repair_new.device_type"}}</dt><dd>{{.Data.Repair.DeviceType}}</dd></div>
+    <div><dt>{{$.Tr "repair_new.brand"}}</dt><dd>{{or .Data.Repair.Brand "—"}}</dd></div>
+    <div><dt>{{$.Tr "repair_new.model"}}</dt><dd>{{or .Data.Repair.Model "—"}}</dd></div>
+    <div><dt>{{$.Tr "repair_new.serial"}}</dt><dd>{{or .Data.Repair.Serial "—"}}</dd></div>
+    <div><dt>{{$.Tr "common.notes"}}</dt><dd>{{or .Data.Repair.Notes "—"}}</dd></div>
+    <div><dt>{{$.Tr "repair_new.issue"}}</dt><dd class="verbatim">{{.Data.Repair.Issue}}</dd></div>
+  </dl>
+  {{end}}
+
+  {{if .Session.CanWrite}}
+  <div class="stage-form">
+    <form method="post" action="/repairs/{{.Data.Repair.ID}}/stage" id="stage-form">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <div class="field">
+        <label for="stage">{{$.Tr "repair.stage"}}</label>
+        <select id="stage" name="stage" required>
+          <option value="">{{$.Tr "repair.select_stage"}}</option>
+          {{range .Data.Stages}}<option value="{{.}}"{{if eq . $.Data.Repair.Stage}} disabled>{{$.Tr (printf "stage.%s" .)}} {{$.Tr "repairs.current"}}{{else}}>{{$.Tr (printf "stage.%s" .)}}{{end}}</option>{{end}}
+        </select>
+      </div>
+      {{if terminalStage .Data.Repair.Stage}}
+      <label class="check"><input type="checkbox" name="reopen" value="1" id="reopen"> {{$.Tr "repair.reopen"}}</label>
+      {{end}}
+      <div class="form-actions"><button type="submit" id="stage-submit">{{$.Tr "repair.update_stage"}}</button></div>
+    </form>
+  </div>
+  <div class="record-secondary">
+    {{if .Data.Repair.ArchivedAt}}
+    <form method="post" action="/repairs/{{.Data.Repair.ID}}/unarchive" id="ticket-unarchive-form">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <button class="quiet" type="submit" id="ticket-unarchive">{{$.Tr "repair.unarchive"}}</button>
+    </form>
+    {{else}}
+    <form method="post" action="/repairs/{{.Data.Repair.ID}}/archive" id="ticket-archive-form">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <button class="quiet" type="submit" id="ticket-archive">{{$.Tr "repair.archive"}}</button>
+    </form>
+    {{end}}
+  </div>
+  {{end}}
+  </div>
+</details>
+
+<details class="panel fold-panel" id="saved-log" open>
+  <summary class="section-heading"><h2>{{$.Tr "repair.log"}}</h2></summary>
+  <div class="panel-body">
+  {{if .Data.Entries}}
+  <ol class="entry-list" id="entry-list">{{range .Data.Entries}}
+    <li class="entry-card" id="entry-{{.ID}}">
+      <div class="entry-meta">
+        <time datetime="{{.CreatedAt}}">{{when .CreatedAt}}</time>
+        <span class="entry-kind-badge">{{$.Tr (printf "kind.%s" .Kind)}}</span>
+        {{if $.Session.CanWrite}}<form class="entry-delete" method="post" action="/repairs/{{$.Data.Repair.ID}}/entries/{{.ID}}/delete">
+          <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+          <button class="entry-delete-button" type="submit" id="entry-delete-{{.ID}}" aria-label="{{$.Tr "repair.delete_entry" .ID}}" title="{{$.Tr "repair.delete_entry" .ID}}">×</button>
+        </form>{{end}}
+      </div>
+      <p class="entry-text">{{.Body}}</p>
+      {{if $.Session.CanWrite}}
+      <details class="entry-edit" id="entry-edit-panel-{{.ID}}">
+        <summary id="entry-edit-toggle-{{.ID}}">{{$.Tr "repair.correct_entry" .ID}}</summary>
+        <form method="post" action="/repairs/{{$.Data.Repair.ID}}/entries/{{.ID}}/edit">
+          <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+          <input type="hidden" name="kind" value="{{.Kind}}">
+          <div class="field"><label for="body-{{.ID}}">{{$.Tr "repair.corrected_text"}}</label><textarea id="body-{{.ID}}" name="body" rows="3" required maxlength="10000">{{.Body}}</textarea></div>
+          <div class="form-actions"><button type="submit" id="entry-edit-{{.ID}}">{{$.Tr "repair.save_correction"}}</button></div>
+        </form>
+      </details>
+      {{end}}
+      {{with index $.Data.EntryRevisions .ID}}
+      <details class="entry-history">
+        <summary>{{$.Tr "repair.revision_history" (len .)}}</summary>
+        <ol class="history-list">{{range .}}
+          <li><time datetime="{{.CreatedAt}}">{{when .CreatedAt}}</time> <strong>{{$.Tr (printf "kind.%s" .PrevKind)}}</strong> · {{.Actor}}<p class="verbatim">{{.PrevBody}}</p></li>
+        {{end}}</ol>
+      </details>
+      {{end}}
+    </li>
+  {{end}}</ol>
+  {{else}}<p class="muted">{{$.Tr "repair.no_entries"}}</p>{{end}}
+
+  {{if .Data.DeletedEntries}}
+  <details class="deleted-entries">
+    <summary>{{$.Tr "repair.deleted_entries" (len .Data.DeletedEntries)}}</summary>
+    <ul class="entry-list">{{range .Data.DeletedEntries}}
+      <li class="entry-card deleted-entry" id="deleted-entry-{{.ID}}">
+        <div class="entry-meta"><time datetime="{{.CreatedAt}}">{{when .CreatedAt}}</time><span class="entry-kind-badge">{{$.Tr (printf "kind.%s" .Kind)}}</span></div>
+        <p class="entry-text">{{.Body}}</p>
+        {{if $.Session.CanWrite}}
+        <form method="post" action="/repairs/{{$.Data.Repair.ID}}/entries/{{.ID}}/restore">
+          <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+          <button class="quiet" type="submit" id="entry-restore-{{.ID}}">{{$.Tr "repair.restore_entry" .ID}}</button>
+        </form>
+        {{end}}
+      </li>
+    {{end}}</ul>
+  </details>
+  {{end}}
+
+  {{if .Session.CanWrite}}
+  <div class="entry-composer-shell">
+    <form id="entry-form" class="entry-form" method="post" action="/repairs/{{.Data.Repair.ID}}/entries">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <div class="entry-composer">
+        <div class="field">
+          <label for="kind">{{$.Tr "repair.entry_type"}}</label>
+          <select id="kind" name="kind">{{range .Data.EntryKinds}}<option value="{{.}}"{{if eq . $.Data.EntryForm.Kind}} selected{{end}}>{{$.Tr (printf "kind.%s" .)}}</option>{{end}}</select>
+        </div>
+        <div class="field">
+          <label for="body">{{$.Tr "repair.new_entry"}}</label>
+          <textarea id="body" name="body" rows="3" required maxlength="10000">{{.Data.EntryForm.Body}}</textarea>
+        </div>
+      </div>
+      <div class="form-actions"><button class="primary" type="submit" id="entry-submit">{{$.Tr "repair.save_entry"}}</button></div>
+    </form>
+  </div>
+  {{end}}
+  </div>
+</details>
+
+<details class="panel fold-panel" id="parts-panel" open>
+  <summary class="section-heading"><h2>{{$.Tr "repair.parts"}}</h2></summary>
+  <div class="panel-body">
+  {{if .Session.CanWrite}}
+  <form id="part-form" method="post" action="/repairs/{{.Data.Repair.ID}}/parts">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <div class="fields part-fields">
+      <div class="field"><label for="description">{{$.Tr "repair.description"}}</label><input id="description" name="description" value="{{.Data.PartForm.Fields.description}}" required maxlength="300"></div>
+      <div class="field"><label for="quantity">{{$.Tr "repair.quantity"}}</label><input id="quantity" name="quantity" value="{{.Data.PartForm.Fields.quantity}}" required inputmode="decimal" placeholder="1.5"></div>
+      <div class="field"><label for="unit">{{$.Tr "repair.unit"}}</label><input id="unit" name="unit" value="{{.Data.PartForm.Fields.unit}}" maxlength="20"></div>
+      <div class="field"><label for="unit_cost">{{$.Tr "repair.unit_cost"}}</label><input id="unit_cost" name="unit_cost" value="{{.Data.PartForm.Fields.unit_cost}}" inputmode="decimal" placeholder="12.34"></div>
+      <div class="field"><label for="unit_price">{{$.Tr "repair.unit_price"}}</label><input id="unit_price" name="unit_price" value="{{.Data.PartForm.Fields.unit_price}}" required inputmode="decimal" placeholder="24.99"></div>
+    </div>
+    <div class="form-actions"><button type="submit" id="part-submit">{{$.Tr "repair.add_part"}}</button></div>
+  </form>
+  {{end}}
+  {{if .Data.Parts}}
+  <div class="table-wrap" tabindex="0" role="region" aria-label="{{$.Tr "repair.parts"}}">
+    <table id="part-list">
+      <thead><tr><th scope="col">{{$.Tr "repair.description"}}</th><th scope="col">{{$.Tr "repair.quantity"}}</th><th scope="col">{{$.Tr "repair.unit_price"}}</th><th scope="col">{{$.Tr "repair.line_total"}}</th>{{if $.Session.CanWrite}}<th scope="col">{{$.Tr "repair.actions"}}</th>{{end}}</tr></thead>
+      <tbody>{{range .Data.Parts}}<tr id="part-{{.ID}}">
+        <td data-label="{{$.Tr "repair.description"}}">{{.Description}}</td>
+        <td data-label="{{$.Tr "repair.quantity"}}">{{milli .QuantityMilli}} {{.Unit}}</td>
+        <td data-label="{{$.Tr "repair.unit_price"}}">{{cents .UnitPriceCents}} {{.Currency}}</td>
+        <td data-label="{{$.Tr "repair.line_total"}}"><strong>{{lineTotal .QuantityMilli .UnitPriceCents}} {{.Currency}}</strong></td>
+        {{if $.Session.CanWrite}}
+        <td data-label="{{$.Tr "repair.actions"}}" class="part-actions">
+          <details class="part-edit" id="part-edit-panel-{{.ID}}">
+            <summary id="part-edit-toggle-{{.ID}}">{{$.Tr "repair.edit"}}</summary>
+            {{with index $.Data.PartForms .ID}}
+            <form method="post" action="/repairs/{{$.Data.Repair.ID}}/parts/{{.ID}}">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <input type="hidden" name="revision" value="{{.Revision}}">
+              <div class="fields part-fields">
+                <div class="field"><label for="part-description-{{.ID}}">{{$.Tr "repair.description"}}</label><input id="part-description-{{.ID}}" name="description" value="{{.Fields.description}}" required maxlength="300"></div>
+                <div class="field"><label for="part-quantity-{{.ID}}">{{$.Tr "repair.quantity"}}</label><input id="part-quantity-{{.ID}}" name="quantity" value="{{.Fields.quantity}}" required inputmode="decimal"></div>
+                <div class="field"><label for="part-unit-{{.ID}}">{{$.Tr "repair.unit"}}</label><input id="part-unit-{{.ID}}" name="unit" value="{{.Fields.unit}}" maxlength="20"></div>
+                <div class="field"><label for="part-cost-{{.ID}}">{{$.Tr "repair.unit_cost"}}</label><input id="part-cost-{{.ID}}" name="unit_cost" value="{{.Fields.unit_cost}}" inputmode="decimal"></div>
+                <div class="field"><label for="part-price-{{.ID}}">{{$.Tr "repair.unit_price"}}</label><input id="part-price-{{.ID}}" name="unit_price" value="{{.Fields.unit_price}}" required inputmode="decimal"></div>
+              </div>
+              <div class="form-actions"><button type="submit" id="part-save-{{.ID}}">{{$.Tr "repair.save_part"}}</button></div>
+            </form>
+          </details>
+          {{end}}
+          <form class="inline" method="post" action="/repairs/{{$.Data.Repair.ID}}/parts/{{.ID}}/remove">
+            <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+            <button class="quiet" type="submit" id="part-remove-{{.ID}}">{{$.Tr "repair.remove"}}</button>
+          </form>
+        </td>
+        {{end}}
+      </tr>{{end}}</tbody>
+    </table>
+  </div>
+  {{else}}<p class="muted">{{$.Tr "repair.no_parts"}}</p>{{end}}
+  {{if .Data.DeletedParts}}
+  <details class="deleted-parts">
+    <summary>{{$.Tr "repair.deleted_parts" (len .Data.DeletedParts)}}</summary>
+    <ul class="line-list">{{range .Data.DeletedParts}}
+      <li id="deleted-part-{{.ID}}">
+        <span class="line-main">{{.Description}}</span>
+        <span class="line-meta">{{milli .QuantityMilli}} {{.Unit}}</span>
+        <span class="line-total">{{lineTotal .QuantityMilli .UnitPriceCents}} {{.Currency}}</span>
+        {{if $.Session.CanWrite}}
+        <span class="line-actions"><form class="inline" method="post" action="/repairs/{{$.Data.Repair.ID}}/parts/{{.ID}}/restore">
+          <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+          <button class="quiet" type="submit" id="part-restore-{{.ID}}">{{$.Tr "repair.restore"}}</button>
+        </form></span>
+        {{end}}
+      </li>
+    {{end}}</ul>
+  </details>
+  {{end}}
+  </div>
+</details>
+
+<details class="panel fold-panel" id="estimates-panel" open>
+  <summary class="section-heading"><h2>{{$.Tr "repair.estimates"}}</h2></summary>
+  <div class="panel-body">
+  {{if .Session.CanWrite}}
+  <form id="estimate-form" method="post" action="/repairs/{{.Data.Repair.ID}}/estimates">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <div class="fields">
+      <div class="field"><label for="note">{{$.Tr "repair.note"}}</label><input id="note" name="note" value="{{.Data.EstimateForm.Note}}" maxlength="2000"></div>
+      <div class="field"><label for="discount_percent">{{$.Tr "repair.discount"}}</label><input id="discount_percent" name="discount_percent" value="{{.Data.EstimateForm.Discount}}" inputmode="numeric" placeholder="10"></div>
+    </div>
+    <div class="form-actions"><button type="submit" id="estimate-submit">{{$.Tr "repair.create_estimate"}}</button></div>
+  </form>
+  {{end}}
+  {{if .Data.Estimates}}
+  <ul class="line-list" id="estimate-list">{{range .Data.Estimates}}
+    {{$currency := .Currency}}
+    <li id="estimate-{{.ID}}">
+      <span class="line-main">v{{.Version}} <span class="estimate-status">{{$.Tr (printf "estimate.status_%s" .Status)}}</span></span>
+      <span class="line-meta">{{$.Pl "repair.lines" (len .Lines)}}</span>
+      <span class="line-total">{{cents .TotalCents}} {{.Currency}}</span>
+      {{if and $.Session.CanWrite (eq .Status "draft")}}
+      <span class="line-actions"><form class="inline" method="post" action="/repairs/{{$.Data.Repair.ID}}/estimates/{{.ID}}/accept">
+        <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+        <button class="quiet" type="submit" id="estimate-accept-{{.ID}}">{{$.Tr "repair.accept"}}</button>
+      </form></span>
+      {{end}}
+      {{if .Lines}}
+      <details class="estimate-lines">
+        <summary>{{$.Tr "repair.line_items"}}</summary>
+        <ul class="history-list">{{range .Lines}}
+          <li>{{.Description}} — {{milli .QuantityMilli}} {{.Unit}} × {{cents .UnitPriceCents}} = {{cents .LineTotalCents}} {{$currency}}</li>
+        {{end}}</ul>
+      </details>
+      {{end}}
+    </li>
+  {{end}}</ul>
+  {{else}}<p class="muted">{{$.Tr "repair.no_estimates"}}</p>{{end}}
+  </div>
+</details>
+
+<details class="panel fold-panel" id="gallery-panel" open>
+  <summary class="section-heading"><h2>{{$.Tr "repair.files"}}</h2></summary>
+  <div class="panel-body">
+  {{if .Session.CanWrite}}
+  <form id="attachment-form" method="post" action="/repairs/{{.Data.Repair.ID}}/attachments" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <div class="fields">
+      <div class="field"><label for="file">{{$.Tr "repair.file"}}</label><input id="file" name="file" type="file" required></div>
+      <div class="field"><label for="caption">{{$.Tr "repair.caption"}}</label><input id="caption" name="caption" maxlength="1000"></div>
+      <div class="field"><label for="entry_id">{{$.Tr "repair.link_entry_optional"}}</label><input id="entry_id" name="entry_id" inputmode="numeric" placeholder="{{$.Tr "repair.entry_id_placeholder"}}"></div>
+    </div>
+    <div class="form-actions"><button type="submit" id="attachment-submit">{{$.Tr "repair.upload"}}</button></div>
+    <p class="muted">{{$.Tr "repair.upload_help" (bytes .Data.MaxUpload)}}</p>
+  </form>
+  {{end}}
+  {{if .Data.Attachs}}
+  <ul class="gallery" id="attachment-list">{{range .Data.Attachs}}
+    <li class="attachment-card" id="attachment-{{.ID}}">
+      {{if .PreviewInline}}<img class="thumb" src="/attachments/{{.ID}}/download" alt="" loading="lazy">{{end}}
+      <div class="attachment-body">
+        <a class="attachment-file" href="/attachments/{{.ID}}/download" id="attachment-download-{{.ID}}">{{.DisplayName}}</a>
+        <span class="attachment-meta">{{.MediaType}} · {{bytes .SizeBytes}}</span>
+        {{if .Caption}}<p class="attachment-caption">{{.Caption}}</p>{{end}}
+        {{if $.Session.CanWrite}}
+        <div class="attachment-actions">
+          <form method="post" action="/attachments/{{.ID}}/caption">
+            <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+            <div class="field"><label for="caption-{{.ID}}">{{$.Tr "repair.caption"}}</label><input id="caption-{{.ID}}" name="caption" value="{{if index $.Data.CaptionDrafts .ID}}{{index $.Data.CaptionDrafts .ID}}{{else}}{{.Caption}}{{end}}" maxlength="1000"></div>
+            <button type="submit" id="caption-save-{{.ID}}">{{$.Tr "repair.save_caption"}}</button>
+          </form>
+          <details class="attachment-links" id="attachment-links-{{.ID}}">
+            <summary>{{$.Tr "repair.log_links"}}{{if .EntryIDs}} ({{len .EntryIDs}}){{end}}</summary>
+            <p class="attachment-meta">{{if .EntryIDs}}{{range $i, $eid := .EntryIDs}}{{if $i}}, {{end}}#{{$eid}}{{end}}{{else}}{{$.Tr "repair.not_linked"}}{{end}}</p>
+            <form class="inline" method="post" action="/attachments/{{.ID}}/link">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <label class="sr-only" for="link-entry-{{.ID}}">{{$.Tr "repair.link_entry_id"}}</label>
+              <input id="link-entry-{{.ID}}" name="entry_id" inputmode="numeric" placeholder="{{$.Tr "repair.entry_id_placeholder"}}" required>
+              <button type="submit" id="attachment-link-{{.ID}}">{{$.Tr "repair.link"}}</button>
+            </form>
+            {{if .EntryIDs}}
+            <form class="inline" method="post" action="/attachments/{{.ID}}/unlink">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <label class="sr-only" for="unlink-entry-{{.ID}}">{{$.Tr "repair.unlink_entry_id"}}</label>
+              <input id="unlink-entry-{{.ID}}" name="entry_id" inputmode="numeric" placeholder="{{$.Tr "repair.entry_id_placeholder"}}" required>
+              <button class="quiet" type="submit" id="attachment-unlink-{{.ID}}">{{$.Tr "repair.unlink"}}</button>
+            </form>
+            {{end}}
+          </details>
+          <form method="post" action="/attachments/{{.ID}}/detach">
+            <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+            <button class="quiet" type="submit" id="detach-{{.ID}}">{{$.Tr "repair.detach"}}</button>
+          </form>
+        </div>
+        {{end}}
+      </div>
+    </li>
+  {{end}}</ul>
+  {{else}}<p class="muted">{{$.Tr "repair.no_files"}}</p>{{end}}
+  {{if .Data.DeletedAttachs}}
+  <details class="deleted-attachments">
+    <summary>{{$.Tr "repair.detached_files" (len .Data.DeletedAttachs)}}</summary>
+    <ul class="line-list">{{range .Data.DeletedAttachs}}
+      <li id="detached-attachment-{{.ID}}">
+        <span class="line-main">{{.DisplayName}}</span>
+        <span class="line-meta">{{.MediaType}} · {{bytes .SizeBytes}} · {{$.Tr "repair.detached"}} {{date .DetachedAt}}</span>
+        {{if $.Session.CanWrite}}
+        <span class="line-actions"><form class="inline" method="post" action="/attachments/{{.ID}}/restore">
+          <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+          <button class="quiet" type="submit" id="attachment-restore-{{.ID}}">{{$.Tr "repair.restore"}}</button>
+        </form></span>
+        {{end}}
+        {{if $.Session.CanPurge}}
+        <details class="attachment-purge">
+          <summary>{{$.Tr "repair.purge"}}</summary>
+          <p class="muted">{{$.Tr "repair.purge_help"}}</p>
+          <form class="inline" method="post" action="/attachments/{{.ID}}/purge">
+            <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+            <input type="hidden" name="confirm" value="1">
+            <button class="quiet" type="submit" id="attachment-purge-{{.ID}}">{{$.Tr "repair.purge_permanently"}}</button>
+          </form>
+        </details>
+        {{end}}
+      </li>
+    {{end}}</ul>
+  </details>
+  {{end}}
+  </div>
+</details>
+
+<details class="panel fold-panel" id="pickup-heading" open>
+  <summary class="section-heading"><h2>{{$.Tr "repair.pickup"}}</h2></summary>
+  <div class="panel-body">
+  <p id="pickup-state" class="ticket-meta">{{if .Data.Repair.PickupAt}}{{$.Tr "repair.collected"}} <time datetime="{{.Data.Repair.PickupAt}}">{{date .Data.Repair.PickupAt}}</time> {{$.Tr "repair.by"}} <strong>{{.Data.Repair.PickedUpBy}}</strong>{{else}}{{$.Tr "repair.not_collected"}}{{end}}</p>
+  {{if .Data.Repair.PickupNotes}}<p class="muted">{{.Data.Repair.PickupNotes}}</p>{{end}}
+  {{if .Session.CanWrite}}
+  <form id="pickup-form" method="post" action="/repairs/{{.Data.Repair.ID}}/pickup">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <div class="fields">
+      <div class="field"><label for="pickup_at">{{$.Tr "repair.collected_at"}}</label><input id="pickup_at" name="pickup_at" type="date" required></div>
+      <div class="field"><label for="picked_up_by">{{$.Tr "repair.collected_by"}}</label><input id="picked_up_by" name="picked_up_by" required maxlength="200"></div>
+      <div class="field"><label for="pickup_notes">{{$.Tr "common.notes"}}</label><input id="pickup_notes" name="pickup_notes" maxlength="5000"></div>
+    </div>
+    <div class="form-actions"><button type="submit" id="pickup-submit">{{if .Data.Repair.PickupAt}}{{$.Tr "repair.update_pickup"}}{{else}}{{$.Tr "repair.record_pickup"}}{{end}}</button></div>
+  </form>
+  {{end}}
+  </div>
+</details>
+
+<details class="panel fold-panel" id="activity-panel">
+  <summary class="section-heading"><h2 id="activity-heading">{{$.Tr "repair.activity" (len .Data.Activity)}}</h2></summary>
+  <div class="panel-body">
+    {{if .Data.Activity}}
+    <ol class="history-list" id="activity-list">{{range .Data.Activity}}
+      <li><time datetime="{{.CreatedAt}}">{{when .CreatedAt}}</time> <strong>{{$.Act .Action}}</strong> — {{.Actor}}{{if .Detail}} · {{detail .Detail}}{{end}}</li>
+    {{end}}</ol>
+    {{else}}<p class="muted" id="activity-list">{{$.Tr "repair.no_activity"}}</p>{{end}}
+  </div>
+</details>
+{{template "tail" .}}

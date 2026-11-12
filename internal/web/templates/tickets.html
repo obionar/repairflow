@@ -1,0 +1,66 @@
+{{template "head" .}}
+<h1 id="tickets-heading" class="sr-only">{{$.Tr "repairs.title"}}</h1>
+{{template "flash" .}}
+
+<form class="search-panel" method="get" action="/repairs" role="search" aria-label="{{$.Tr "repairs.search"}}" data-live-search>
+  <div class="field">
+    <label class="sr-only" for="search">{{$.Tr "repairs.search"}}</label>
+    <input id="search" name="search" type="search" value="{{.Data.Search}}" placeholder="{{$.Tr "repairs.search_placeholder"}}" autocomplete="off">
+  </div>
+  <div class="field">
+    <label class="sr-only" for="stage-filter">{{$.Tr "common.status"}}</label>
+    <select id="stage-filter" name="stage">
+      <option value="">{{$.Tr "repairs.all_stages"}}</option>
+      {{range .Data.Stages}}<option value="{{.}}"{{if eq . $.Data.Stage}} selected{{end}}>{{$.Tr (printf "stage.%s" .)}}</option>{{end}}
+    </select>
+  </div>
+  <div class="field">
+    <label class="sr-only" for="picked-up-filter">{{$.Tr "repairs.pickup_status"}}</label>
+    <select id="picked-up-filter" name="picked_up">
+      <option value="">{{$.Tr "repairs.all_pickup"}}</option>
+      <option value="no"{{if eq .Data.PickedUp "no"}} selected{{end}}>{{$.Tr "repairs.in_shop"}}</option>
+      <option value="yes"{{if eq .Data.PickedUp "yes"}} selected{{end}}>{{$.Tr "repairs.picked_up"}}</option>
+    </select>
+  </div>
+  <button type="submit" class="sr-only">{{$.Tr "common.search"}}</button>
+  {{if or .Data.Search .Data.Stage .Data.PickedUp}}<a class="button quiet" href="/repairs">{{$.Tr "common.clear"}}</a>{{end}}
+</form>
+
+<div id="results" data-live-results>{{template "repairs-results" .}}</div>
+
+{{if .Session.CanWrite}}
+<div class="list-actions">
+  <a class="button primary" href="/repairs/new" id="new-ticket">{{template "icon-plus"}}{{$.Tr "repairs.new"}}</a>
+</div>
+{{end}}
+{{template "tail" .}}
+
+{{define "repairs-results"}}
+<section class="panel table-window">
+  <div class="section-heading"><h2>{{$.Tr "repairs.title"}}</h2></div>
+  {{if .Data.Page.Items}}
+  <div class="table-wrap" tabindex="0" role="region" aria-label="{{$.Tr "repairs.title"}}">
+    <table id="ticket-table">
+      <thead><tr><th scope="col">{{$.Tr "common.device"}}</th><th scope="col">{{$.Tr "common.customer"}}</th><th scope="col">{{$.Tr "common.status"}}</th><th scope="col">{{$.Tr "common.created"}}</th></tr></thead>
+      <tbody>{{range .Data.Page.Items}}<tr>
+        <td data-label="{{$.Tr "common.device"}}"><a class="record-link" href="/repairs/{{.ID}}"><span class="record-id">#{{.ID}}</span> <span class="record-title">{{.Device}}</span></a>{{if .ArchivedAt}} <span class="stage">{{$.Tr "common.archived"}}</span>{{end}}<span class="issue-line">{{.Issue}}</span></td>
+        <td data-label="{{$.Tr "common.customer"}}">{{if .Unassigned}}<span class="muted">{{$.Tr "common.unassigned"}}</span>{{else}}<a href="/customers/{{.CustomerID}}">{{.CustomerName}}</a>{{end}}</td>
+        <td data-label="{{$.Tr "common.status"}}"><span class="stage {{.Stage}}">{{$.Tr (printf "stage.%s" .Stage)}}</span></td>
+        <td data-label="{{$.Tr "common.created"}}"><time datetime="{{.CreatedAt}}">{{date .CreatedAt}}</time></td>
+      </tr>{{end}}</tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="window-content">
+    <h3>{{$.Tr "repairs.no_match"}}</h3>
+    <p class="muted">{{if or .Data.Search .Data.Stage .Data.PickedUp}}{{$.Tr "repairs.try_filters"}}{{else}}{{$.Tr "repairs.no_repairs"}}{{end}}</p>
+  </div>
+  {{end}}
+</section>
+{{if or .Data.Prev .Data.Next}}
+<nav class="pagination" aria-label="{{$.Tr "repairs.pages"}}">
+  {{if .Data.Prev}}<a href="/repairs?search={{urlquery .Data.Search}}&stage={{urlquery .Data.Stage}}&picked_up={{urlquery .Data.PickedUp}}&page={{.Data.Prev}}">{{$.Tr "common.previous"}}</a>{{end}}
+  {{if .Data.Next}}<a href="/repairs?search={{urlquery .Data.Search}}&stage={{urlquery .Data.Stage}}&picked_up={{urlquery .Data.PickedUp}}&page={{.Data.Next}}">{{$.Tr "common.next"}}</a>{{end}}
+</nav>
+{{end}}
+{{end}}

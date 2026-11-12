@@ -1,0 +1,50 @@
+{{template "head" .}}
+<h1 id="customers-heading" class="sr-only">{{$.Tr "customers.title"}}</h1>
+{{template "flash" .}}
+
+<form class="search-panel" method="get" action="/customers" role="search" aria-label="{{$.Tr "customers.search"}}" data-live-search>
+  <div class="field">
+    <label class="sr-only" for="search">{{$.Tr "customers.search"}}</label>
+    <input id="search" name="search" type="search" value="{{.Data.Search}}" placeholder="{{$.Tr "customers.search_placeholder"}}" autocomplete="off">
+  </div>
+  <button type="submit" class="sr-only">{{$.Tr "common.search"}}</button>
+  {{if .Data.Search}}<a class="button quiet" href="/customers">{{$.Tr "common.clear"}}</a>{{end}}
+</form>
+
+<div id="results" data-live-results>{{template "customers-results" .}}</div>
+
+{{if .Session.CanWrite}}
+<div class="list-actions">
+  <a class="button primary" href="/customers/new" id="new-customer">{{template "icon-plus"}}{{$.Tr "customers.new"}}</a>
+</div>
+{{end}}
+{{template "tail" .}}
+
+{{define "customers-results"}}
+<section class="panel table-window">
+  <div class="section-heading"><h2>{{$.Tr "customers.title"}}</h2></div>
+  {{if .Data.Page.Items}}
+  <div class="table-wrap" tabindex="0" role="region" aria-label="{{$.Tr "customers.title"}}">
+    <table id="customer-table">
+      <thead><tr><th scope="col">{{$.Tr "common.customer"}}</th><th scope="col">{{$.Tr "common.phone"}}</th><th scope="col">{{$.Tr "common.email"}}</th></tr></thead>
+      <tbody>{{range .Data.Page.Items}}<tr>
+        <td data-label="{{$.Tr "common.customer"}}"><a class="record-link" href="/customers/{{.ID}}"><span class="record-id">#{{.ID}}</span> <span class="record-title">{{.Name}}</span></a>{{if .ArchivedAt}} <span class="stage">{{$.Tr "common.archived"}}</span>{{end}}</td>
+        <td data-label="{{$.Tr "common.phone"}}">{{or .Phone "—"}}</td>
+        <td data-label="{{$.Tr "common.email"}}">{{or .Email "—"}}</td>
+      </tr>{{end}}</tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="window-content">
+    <h3>{{if .Data.Search}}{{$.Tr "customers.no_match"}}{{else}}{{$.Tr "customers.no_customers"}}{{end}}</h3>
+    <p class="muted">{{if .Data.Search}}{{$.Tr "customers.try_other"}}{{else}}{{$.Tr "customers.create_first"}}{{end}}</p>
+  </div>
+  {{end}}
+</section>
+{{if or .Data.Prev .Data.Next}}
+<nav class="pagination" aria-label="{{$.Tr "customers.pages"}}">
+  {{if .Data.Prev}}<a href="/customers?search={{urlquery .Data.Search}}&page={{.Data.Prev}}">{{$.Tr "common.previous"}}</a>{{end}}
+  {{if .Data.Next}}<a href="/customers?search={{urlquery .Data.Search}}&page={{.Data.Next}}">{{$.Tr "common.next"}}</a>{{end}}
+</nav>
+{{end}}
+{{end}}

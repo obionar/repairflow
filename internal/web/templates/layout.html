@@ -1,0 +1,53 @@
+{{define "head"}}<!doctype html>
+<html lang="{{.Lang}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · RepairFlow</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/navigation.js" defer></script>
+<script src="/static/panels.js" defer></script>
+<script src="/static/livesearch.js" defer></script>
+<script src="/static/customer-picker.js" defer></script>
+</head>
+<body class="workspace{{if not .Session}} public-shell{{end}}">
+<a class="skip" href="#main">{{$.Tr "nav.skip"}}</a>
+{{if .Session}}{{template "navigation" .}}{{end}}
+<main id="main" tabindex="-1">
+{{end}}
+
+{{define "tail"}}
+</main>
+</body>
+</html>{{end}}
+
+{{define "flash"}}{{if .Error}}<p id="error" class="notice notice-warn" role="alert">{{.Error}}</p>{{end}}{{end}}
+
+{{define "navigation"}}
+<header class="site-header">
+  <div class="header-inner">
+    <details class="navigation-menu" id="navigation-menu">
+      <summary class="menu-toggle" aria-label="{{$.Tr "nav.menu"}}" title="{{$.Tr "nav.menu"}}">{{template "icon-menu"}}</summary>
+    </details>
+    <a class="brand" href="/" aria-label="{{$.Tr "nav.dashboard"}}" title="{{$.Tr "nav.dashboard"}}"{{if eq .Active "dashboard"}} aria-current="page"{{end}}>
+      <span class="brand-mark" aria-hidden="true">R</span>
+      <span class="brand-copy">RepairFlow</span>
+    </a>
+    <div class="nav-backdrop" aria-hidden="true"></div>
+    <nav class="main-nav" id="main-navigation" aria-label="Main navigation">
+      <a class="nav-dashboard-link" href="/" aria-label="{{$.Tr "nav.dashboard"}}" title="{{$.Tr "nav.dashboard"}}"{{if eq .Active "dashboard"}} aria-current="page"{{end}}>{{template "icon-dashboard"}}<span class="nav-label">{{$.Tr "nav.dashboard"}}</span></a>
+      <a href="/customers" aria-label="{{$.Tr "nav.customers"}}" title="{{$.Tr "nav.customers"}}"{{if eq .Active "customers"}} aria-current="page"{{end}}>{{template "icon-customers"}}<span class="nav-label">{{$.Tr "nav.customers"}}</span></a>
+      <a href="/tickets" aria-label="{{$.Tr "nav.repairs"}}" title="{{$.Tr "nav.repairs"}}"{{if eq .Active "tickets"}} aria-current="page"{{end}}>{{template "icon-repairs"}}<span class="nav-label">{{$.Tr "nav.repairs"}}</span></a>
+      <a href="/settings" aria-label="{{$.Tr "nav.settings"}}" title="{{$.Tr "nav.settings"}}"{{if eq .Active "settings"}} aria-current="page"{{end}}>{{template "icon-settings"}}<span class="nav-label">{{$.Tr "nav.settings"}}</span></a>
+      <div class="nav-account">
+        <span id="userbox">{{.Session.Username}} ({{.Session.Role}})</span>
+        <form method="post" action="/logout" class="nav-logout">
+          <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+          <button id="logout" class="nav-logout-button" type="submit" aria-label="{{$.Tr "nav.logout"}}" title="{{$.Tr "nav.logout"}}">{{template "icon-logout"}}<span class="nav-label">{{$.Tr "nav.logout"}}</span></button>
+        </form>
+      </div>
+    </nav>
+  </div>
+</header>
+{{end}}

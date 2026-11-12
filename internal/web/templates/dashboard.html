@@ -1,0 +1,54 @@
+{{template "head" .}}
+<h1 id="dashboard-heading" class="sr-only">{{$.Tr "dashboard.title"}}</h1>
+{{template "flash" .}}
+
+<section class="panel table-window dashboard-panel">
+  <div class="section-heading"><h2>{{$.Tr "dashboard.workbench"}}</h2><div class="section-links"><span>{{$.Pl "dashboard.open" .Data.Queues.OpenCount}}</span> · <a href="/tickets">{{$.Tr "dashboard.view_all_repairs"}}</a></div></div>
+  {{if .Data.Queues.Workbench}}
+  <div class="table-wrap" tabindex="0" role="region" aria-label="{{$.Tr "dashboard.recent_repairs"}}">
+    <table id="ticket-table">
+      <thead><tr><th scope="col">{{$.Tr "dashboard.col_repair"}}</th><th scope="col">{{$.Tr "dashboard.col_customer"}}</th><th scope="col">{{$.Tr "dashboard.col_status"}}</th><th scope="col">{{$.Tr "dashboard.col_created"}}</th></tr></thead>
+      <tbody>{{range .Data.Queues.Workbench}}<tr>
+        <td data-label="Repair"><a class="record-link" href="/tickets/{{.ID}}"><span class="record-id">#{{.ID}}</span> <span class="record-title">{{.Device}}</span></a><span class="issue-line">{{.Issue}}</span></td>
+        <td data-label="{{$.Tr "dashboard.col_customer"}}">{{if .Unassigned}}<span class="muted">{{$.Tr "common.unassigned"}}</span>{{else}}<a href="/customers/{{.CustomerID}}">{{.CustomerName}}</a>{{end}}</td>
+        <td data-label="{{$.Tr "dashboard.col_status"}}"><span class="status-widget"><span class="stage {{.Stage}}">{{$.Tr (printf "stage.%s" .Stage)}}</span>{{if or .PickupAt .ArchivedAt (terminalStage .Stage)}}<span class="status-flags"><span class="status-flag{{if .PickupAt}} on{{end}}" title="{{$.Tr "repairs.picked_up"}}"><span class="dot" aria-hidden="true"></span>{{$.Tr "repairs.picked_up"}}</span>{{if .ArchivedAt}}<span class="status-flag on"><span class="dot" aria-hidden="true"></span>{{$.Tr "common.archived"}}</span>{{end}}</span>{{end}}</span></td>
+        <td data-label="Created"><time datetime="{{.CreatedAt}}">{{date .CreatedAt}}</time></td>
+      </tr>{{end}}</tbody>
+    </table>
+  </div>
+  {{else}}<div class="window-content"><p class="muted">{{$.Tr "dashboard.no_open"}}</p></div>{{end}}
+</section>
+
+<section class="panel table-window dashboard-panel">
+  <div class="section-heading"><h2>{{$.Tr "dashboard.ready"}}</h2><div class="section-links"><span>{{$.Pl "dashboard.waiting" .Data.Queues.AwaitingPickup}}</span></div></div>
+  {{if .Data.Queues.ReadyForCollection}}
+  <div class="table-wrap" tabindex="0" role="region" aria-label="{{$.Tr "dashboard.awaiting_pickup"}}">
+    <table id="collection-table">
+      <thead><tr><th scope="col">{{$.Tr "dashboard.col_repair"}}</th><th scope="col">{{$.Tr "dashboard.col_customer"}}</th><th scope="col">{{$.Tr "dashboard.col_outcome"}}</th><th scope="col">{{$.Tr "dashboard.col_updated"}}</th></tr></thead>
+      <tbody>{{range .Data.Queues.ReadyForCollection}}<tr>
+        <td data-label="Repair"><a class="record-link" href="/tickets/{{.ID}}"><span class="record-id">#{{.ID}}</span> <span class="record-title">{{.Device}}</span></a><span class="issue-line">{{.Issue}}</span></td>
+        <td data-label="{{$.Tr "dashboard.col_customer"}}">{{if .Unassigned}}<span class="muted">{{$.Tr "common.unassigned"}}</span>{{else}}<a href="/customers/{{.CustomerID}}">{{.CustomerName}}</a>{{end}}</td>
+        <td data-label="{{$.Tr "dashboard.col_outcome"}}"><span class="stage {{.Stage}}">{{$.Tr (printf "stage.%s" .Stage)}}</span></td>
+        <td data-label="Updated"><time datetime="{{.UpdatedAt}}">{{date .UpdatedAt}}</time></td>
+      </tr>{{end}}</tbody>
+    </table>
+  </div>
+  {{else}}<div class="window-content"><p class="muted">{{$.Tr "dashboard.nothing_awaiting"}}</p></div>{{end}}
+</section>
+
+<section class="panel table-window dashboard-panel">
+  <div class="section-heading"><h2>{{$.Tr "dashboard.customers"}}</h2><div class="section-links"><a href="/customers">{{$.Tr "dashboard.view_all_customers"}}</a></div></div>
+  {{if .Data.Customers.Items}}
+  <div class="table-wrap" tabindex="0" role="region" aria-label="{{$.Tr "dashboard.recent_customers"}}">
+    <table id="customer-table">
+      <thead><tr><th scope="col">{{$.Tr "dashboard.col_customer"}}</th><th scope="col">{{$.Tr "dashboard.col_phone"}}</th><th scope="col">{{$.Tr "dashboard.col_email"}}</th></tr></thead>
+      <tbody>{{range .Data.Customers.Items}}<tr>
+        <td data-label="{{$.Tr "dashboard.col_customer"}}"><a class="record-link" href="/customers/{{.ID}}"><span class="record-id">#{{.ID}}</span> <span class="record-title">{{.Name}}</span></a></td>
+        <td data-label="Phone">{{or .Phone "—"}}</td>
+        <td data-label="Email">{{or .Email "—"}}</td>
+      </tr>{{end}}</tbody>
+    </table>
+  </div>
+  {{else}}<div class="window-content"><p class="muted">{{$.Tr "customers.no_customers"}}</p></div>{{end}}
+</section>
+{{template "tail" .}}

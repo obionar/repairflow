@@ -1,0 +1,11 @@
+{{template "head" .}}
+<h1 id="error-heading">{{$.Tr "error.title"}}</h1>
+{{template "flash" .}}
+<details class="panel fold-panel" id="request-rejected" open>
+  <summary class="section-heading"><h2>{{$.Tr "error.heading"}}</h2></summary>
+  <div class="panel-body">
+    <p class="muted">{{$.Tr "error.body"}}</p>
+    <p><a class="button" href="/" id="error-back">{{$.Tr "error.back"}}</a></p>
+  </div>
+</details>
+{{template "tail" .}}
