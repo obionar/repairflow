@@ -105,76 +105,77 @@ func (s *Service) AddRepairPart(ctx context.Context, actor string, repairID int6
 
 // UpdateRepairPart patches a part line under an optional revision check;
 // every change is audited and the price history is preserved in the audit
-// detail (corrections never silently rewrite history).
+// detail (corrections never silently rewrite history). The row is read inside
+// the write transaction so a concurrent commit cannot be overwritten.
 func (s *Service) UpdateRepairPart(ctx context.Context, actor string, partID int64, patch PartPatch, wantRevision string) (Part, error) {
 	actor, err := normalizeActor(actor)
 	if err != nil {
 		return Part{}, err
 	}
-	current, err := s.GetRepairPart(ctx, partID)
-	if err != nil {
-		return Part{}, err
-	}
-	if current.DeletedAt != "" {
-		return Part{}, errs.New(errs.CodeConflict, "part %d is removed; restore it before editing", partID)
-	}
-	if err := checkRevision(wantRevision, current.Revision, "part"); err != nil {
-		return Part{}, err
-	}
+	var out Part
+	err = s.InTx(ctx, func(ctx context.Context) error {
+		current, err := s.GetRepairPart(ctx, partID)
+		if err != nil {
+			return err
+		}
+		if current.DeletedAt != "" {
+			return errs.New(errs.CodeConflict, "part %d is removed; restore it before editing", partID)
+		}
+		if err := checkRevision(wantRevision, current.Revision, "part"); err != nil {
+			return err
+		}
 
-	desc, qty, unit, cost, price, notes := current.Description, current.QuantityMilli, current.Unit, current.UnitCostCents, current.UnitPriceCents, current.Notes
-	if patch.Description != nil {
-		desc = *patch.Description
-	}
-	if patch.QuantityMilli != nil {
-		qty = *patch.QuantityMilli
-	}
-	if patch.Unit != nil {
-		unit = *patch.Unit
-	}
-	if patch.UnitCostCents != nil {
-		cost = patch.UnitCostCents
-	}
-	if patch.ClearCost {
-		cost = nil
-	}
-	if patch.UnitPriceCents != nil {
-		price = *patch.UnitPriceCents
-	}
-	if patch.Notes != nil {
-		notes = *patch.Notes
-	}
-	v, err := validatePart(desc, qty, unit, cost, price, notes)
-	if err != nil {
-		return Part{}, err
-	}
+		desc, qty, unit, cost, price, notes := current.Description, current.QuantityMilli, current.Unit, current.UnitCostCents, current.UnitPriceCents, current.Notes
+		if patch.Description != nil {
+			desc = *patch.Description
+		}
+		if patch.QuantityMilli != nil {
+			qty = *patch.QuantityMilli
+		}
+		if patch.Unit != nil {
+			unit = *patch.Unit
+		}
+		if patch.UnitCostCents != nil {
+			cost = patch.UnitCostCents
+		}
+		if patch.ClearCost {
+			cost = nil
+		}
+		if patch.UnitPriceCents != nil {
+			price = *patch.UnitPriceCents
+		}
+		if patch.Notes != nil {
+			notes = *patch.Notes
+		}
+		v, err := validatePart(desc, qty, unit, cost, price, notes)
+		if err != nil {
+			return err
+		}
 
-	ts := s.timestamp()
-	q, commit, rollback, err := s.beginWrite(ctx)
+		ts := s.timestamp()
+		if _, err := s.q(ctx).ExecContext(ctx,
+			`UPDATE repair_parts SET description=?, quantity_milli=?, unit=?, unit_cost_cents=?, unit_price_cents=?, notes=?, updated_at=? WHERE id=?`,
+			v.Description, v.QuantityMilli, v.Unit, v.UnitCostCents, v.UnitPriceCents, v.Notes, ts, partID); err != nil {
+			return errs.Wrap(errs.CodeInternal, err, "cannot update part %d", partID)
+		}
+		action := "part_update"
+		detail := map[string]any{
+			"part_id": partID,
+			"from":    map[string]any{"description": current.Description, "quantity_milli": current.QuantityMilli, "unit": current.Unit, "unit_cost_cents": current.UnitCostCents, "unit_price_cents": current.UnitPriceCents},
+			"to":      map[string]any{"description": v.Description, "quantity_milli": v.QuantityMilli, "unit": v.Unit, "unit_cost_cents": v.UnitCostCents, "unit_price_cents": v.UnitPriceCents},
+		}
+		if _, err := s.q(ctx).ExecContext(ctx,
+			`INSERT INTO repair_activity(repair_id, actor, action, detail, created_at) VALUES(?,?,?,?,?)`,
+			current.RepairID, actor, action, detailJSON(detail), ts); err != nil {
+			return errs.Wrap(errs.CodeInternal, err, "cannot record repair activity")
+		}
+		out, err = s.GetRepairPart(ctx, partID)
+		return err
+	})
 	if err != nil {
 		return Part{}, err
 	}
-	defer rollback()
-	if _, err := q.ExecContext(ctx,
-		`UPDATE repair_parts SET description=?, quantity_milli=?, unit=?, unit_cost_cents=?, unit_price_cents=?, notes=?, updated_at=? WHERE id=?`,
-		v.Description, v.QuantityMilli, v.Unit, v.UnitCostCents, v.UnitPriceCents, v.Notes, ts, partID); err != nil {
-		return Part{}, errs.Wrap(errs.CodeInternal, err, "cannot update part %d", partID)
-	}
-	action := "part_update"
-	detail := map[string]any{
-		"part_id": partID,
-		"from":    map[string]any{"description": current.Description, "quantity_milli": current.QuantityMilli, "unit": current.Unit, "unit_cost_cents": current.UnitCostCents, "unit_price_cents": current.UnitPriceCents},
-		"to":      map[string]any{"description": v.Description, "quantity_milli": v.QuantityMilli, "unit": v.Unit, "unit_cost_cents": v.UnitCostCents, "unit_price_cents": v.UnitPriceCents},
-	}
-	if _, err := q.ExecContext(ctx,
-		`INSERT INTO repair_activity(repair_id, actor, action, detail, created_at) VALUES(?,?,?,?,?)`,
-		current.RepairID, actor, action, detailJSON(detail), ts); err != nil {
-		return Part{}, errs.Wrap(errs.CodeInternal, err, "cannot record repair activity")
-	}
-	if err := commit(); err != nil {
-		return Part{}, errs.Wrap(errs.CodeInternal, err, "cannot commit part update")
-	}
-	return s.GetRepairPart(ctx, partID)
+	return out, nil
 }
 
 // DeleteRepairPart soft-deletes a part line; RestoreRepairPart

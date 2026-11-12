@@ -157,112 +157,113 @@ func (s *Service) GetRepair(ctx context.Context, id int64, includeDeleted bool) 
 }
 
 // UpdateRepairDetails applies a patch under an optional stale-revision check.
+// The revision is read inside the write transaction, so a concurrent commit
+// between the check and the UPDATE is refused instead of silently overwritten.
 func (s *Service) UpdateRepairDetails(ctx context.Context, actor string, id int64, patch RepairPatch, wantRevision string) (Repair, error) {
 	actor, err := normalizeActor(actor)
 	if err != nil {
 		return Repair{}, err
 	}
-	current, err := s.GetRepairRow(ctx, id)
-	if err != nil {
-		return Repair{}, err
-	}
-	if err := checkRevision(wantRevision, current.Revision, "repair"); err != nil {
-		return Repair{}, err
-	}
-
-	if patch.Device != nil && patch.DeviceType != nil &&
-		strings.TrimSpace(*patch.Device) != strings.TrimSpace(*patch.DeviceType) {
-		return Repair{}, errs.New(errs.CodeValidation, "device and device_type aliases must not differ")
-	}
-	deviceType, brand, model, serial := current.DeviceType, current.Brand, current.Model, current.Serial
-	issue, notes := current.Issue, current.Notes
-	customerID := current.CustomerID
-	changes := map[string]map[string]string{}
-	if patch.CustomerID != nil {
-		if *patch.CustomerID < 0 {
-			return Repair{}, errs.New(errs.CodeValidation, "customer_id must be zero (unassigned) or a positive id")
-		}
-		if *patch.CustomerID != customerID {
-			changes["customer_id"] = map[string]string{
-				"from": strconv.FormatInt(customerID, 10), "to": strconv.FormatInt(*patch.CustomerID, 10),
-			}
-			customerID = *patch.CustomerID
-		}
-	}
-	set := func(field string, target *string, value *string, max int, required bool) error {
-		if value == nil {
-			return nil
-		}
-		cleaned, err := validateText(field, *value, max, required)
+	var out Repair
+	err = s.InTx(ctx, func(ctx context.Context) error {
+		current, err := s.GetRepairRow(ctx, id)
 		if err != nil {
 			return err
 		}
-		if cleaned != *target {
-			changes[field] = map[string]string{"from": *target, "to": cleaned}
-			*target = cleaned
+		if err := checkRevision(wantRevision, current.Revision, "repair"); err != nil {
+			return err
 		}
-		return nil
-	}
-	if patch.DeviceType != nil {
-		if err := set("device_type", &deviceType, patch.DeviceType, maxDevice, true); err != nil {
-			return Repair{}, err
+
+		if patch.Device != nil && patch.DeviceType != nil &&
+			strings.TrimSpace(*patch.Device) != strings.TrimSpace(*patch.DeviceType) {
+			return errs.New(errs.CodeValidation, "device and device_type aliases must not differ")
 		}
-	}
-	if patch.Device != nil {
-		if err := set("device", &deviceType, patch.Device, maxDevice, true); err != nil {
-			return Repair{}, err
+		deviceType, brand, model, serial := current.DeviceType, current.Brand, current.Model, current.Serial
+		issue, notes := current.Issue, current.Notes
+		customerID := current.CustomerID
+		changes := map[string]map[string]string{}
+		if patch.CustomerID != nil {
+			if *patch.CustomerID < 0 {
+				return errs.New(errs.CodeValidation, "customer_id must be zero (unassigned) or a positive id")
+			}
+			if *patch.CustomerID != customerID {
+				changes["customer_id"] = map[string]string{
+					"from": strconv.FormatInt(customerID, 10), "to": strconv.FormatInt(*patch.CustomerID, 10),
+				}
+				customerID = *patch.CustomerID
+			}
 		}
-	}
-	for _, field := range []struct {
-		name   string
-		target *string
-		value  *string
-	}{
-		{"brand", &brand, patch.Brand}, {"model", &model, patch.Model},
-		{"serial", &serial, patch.Serial},
-		{"issue", &issue, patch.Issue}, {"notes", &notes, patch.Notes},
-	} {
-		required := field.name == "issue"
-		if err := set(field.name, field.target, field.value, maxIssue, required); err != nil {
-			return Repair{}, err
+		set := func(field string, target *string, value *string, max int, required bool) error {
+			if value == nil {
+				return nil
+			}
+			cleaned, err := validateText(field, *value, max, required)
+			if err != nil {
+				return err
+			}
+			if cleaned != *target {
+				changes[field] = map[string]string{"from": *target, "to": cleaned}
+				*target = cleaned
+			}
+			return nil
 		}
-	}
-	in, err := normalizeRepairInput(RepairInput{
-		CustomerID: customerID, DeviceType: deviceType, Brand: brand, Model: model,
-		Serial: serial, Issue: issue, Notes: notes,
+		if patch.DeviceType != nil {
+			if err := set("device_type", &deviceType, patch.DeviceType, maxDevice, true); err != nil {
+				return err
+			}
+		}
+		if patch.Device != nil {
+			if err := set("device", &deviceType, patch.Device, maxDevice, true); err != nil {
+				return err
+			}
+		}
+		for _, field := range []struct {
+			name   string
+			target *string
+			value  *string
+		}{
+			{"brand", &brand, patch.Brand}, {"model", &model, patch.Model},
+			{"serial", &serial, patch.Serial},
+			{"issue", &issue, patch.Issue}, {"notes", &notes, patch.Notes},
+		} {
+			required := field.name == "issue"
+			if err := set(field.name, field.target, field.value, maxIssue, required); err != nil {
+				return err
+			}
+		}
+		in, err := normalizeRepairInput(RepairInput{
+			CustomerID: customerID, DeviceType: deviceType, Brand: brand, Model: model,
+			Serial: serial, Issue: issue, Notes: notes,
+		})
+		if err != nil {
+			return err
+		}
+
+		ts := s.timestamp()
+		if _, err := s.q(ctx).ExecContext(ctx,
+			`UPDATE repairs SET customer_id=?, device=?, device_type=?, brand=?, model=?, serial=?, issue=?, notes=?, updated_at=? WHERE id=?`,
+			nullableCustomerID(in.CustomerID), in.Device, in.DeviceType, in.Brand, in.Model, in.Serial, in.Issue, in.Notes, ts, id); err != nil {
+			if isForeignKeyViolation(err) {
+				return errs.Wrap(errs.CodeValidation, err, "customer %d does not exist", in.CustomerID)
+			}
+			return errs.Wrap(errs.CodeInternal, err, "cannot update repair %d", id)
+		}
+		action := "update"
+		if len(changes) == 0 {
+			action = "update_noop"
+		}
+		if _, err := s.q(ctx).ExecContext(ctx,
+			`INSERT INTO repair_activity(repair_id, actor, action, detail, created_at) VALUES(?,?,?,?,?)`,
+			id, actor, action, detailJSON(changes), ts); err != nil {
+			return errs.Wrap(errs.CodeInternal, err, "cannot record repair activity")
+		}
+		out, err = s.GetRepairRow(ctx, id)
+		return err
 	})
 	if err != nil {
 		return Repair{}, err
 	}
-
-	ts := s.timestamp()
-	tx, commit, rollback, err := s.beginWrite(ctx)
-	if err != nil {
-		return Repair{}, err
-	}
-	defer rollback()
-
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE repairs SET customer_id=?, device=?, device_type=?, brand=?, model=?, serial=?, issue=?, notes=?, updated_at=? WHERE id=?`,
-		nullableCustomerID(in.CustomerID), in.Device, in.DeviceType, in.Brand, in.Model, in.Serial, in.Issue, in.Notes, ts, id); err != nil {
-		if isForeignKeyViolation(err) {
-			return Repair{}, errs.Wrap(errs.CodeValidation, err, "customer %d does not exist", in.CustomerID)
-		}
-		return Repair{}, errs.Wrap(errs.CodeInternal, err, "cannot update repair %d", id)
-	}
-	action := "update"
-	if len(changes) == 0 {
-		action = "update_noop"
-	}
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO repair_activity(repair_id, actor, action, detail, created_at) VALUES(?,?,?,?,?)`,
-		id, actor, action, detailJSON(changes), ts); err != nil {
-		return Repair{}, errs.Wrap(errs.CodeInternal, err, "cannot record repair activity")
-	}
-	if err := commit(); err != nil {
-		return Repair{}, errs.Wrap(errs.CodeInternal, err, "cannot commit repair update")
-	}
-	return s.GetRepairRow(ctx, id)
+	return out, nil
 }
 
 // SetRepairStage validates and applies a permitted stage transition.
@@ -276,52 +277,51 @@ func (s *Service) SetRepairStage(ctx context.Context, actor string, id int64, st
 	if !stageSet[stage] {
 		return Repair{}, errs.New(errs.CodeValidation, "unknown stage %q (valid: %v)", stage, Stages)
 	}
-	current, err := s.GetRepairRow(ctx, id)
+	var out Repair
+	err = s.InTx(ctx, func(ctx context.Context) error {
+		current, err := s.GetRepairRow(ctx, id)
+		if err != nil {
+			return err
+		}
+		if stage == current.Stage {
+			return errs.New(errs.CodeConflict, "repair %d is already in stage %q", id, stage)
+		}
+		allowed := transitions[current.Stage]
+		if !contains(allowed, stage) {
+			return errs.New(errs.CodeValidation,
+				"stage transition %q -> %q is not allowed (from %q: %v); reopening a terminal stage requires --reopen",
+				current.Stage, stage, current.Stage, allowed)
+		}
+		if terminalStages[current.Stage] && !reopen {
+			return errs.New(errs.CodeValidation,
+				"repair %d is in terminal stage %q; reopening to %q requires explicit --reopen", id, current.Stage, stage)
+		}
+
+		ts := s.timestamp()
+		if _, err := s.q(ctx).ExecContext(ctx,
+			`UPDATE repairs SET stage=?, updated_at=? WHERE id=?`, stage, ts, id); err != nil {
+			return errs.Wrap(errs.CodeInternal, err, "cannot set repair stage")
+		}
+		action := "stage_change"
+		if terminalStages[current.Stage] {
+			action = "stage_reopen"
+		}
+		detail := map[string]any{"from": current.Stage, "to": stage}
+		if reopen {
+			detail["reopen"] = true
+		}
+		if _, err := s.q(ctx).ExecContext(ctx,
+			`INSERT INTO repair_activity(repair_id, actor, action, detail, created_at) VALUES(?,?,?,?,?)`,
+			id, actor, action, detailJSON(detail), ts); err != nil {
+			return errs.Wrap(errs.CodeInternal, err, "cannot record repair activity")
+		}
+		out, err = s.GetRepairRow(ctx, id)
+		return err
+	})
 	if err != nil {
 		return Repair{}, err
 	}
-	if stage == current.Stage {
-		return Repair{}, errs.New(errs.CodeConflict, "repair %d is already in stage %q", id, stage)
-	}
-	allowed := transitions[current.Stage]
-	if !contains(allowed, stage) {
-		return Repair{}, errs.New(errs.CodeValidation,
-			"stage transition %q -> %q is not allowed (from %q: %v); reopening a terminal stage requires --reopen",
-			current.Stage, stage, current.Stage, allowed)
-	}
-	if terminalStages[current.Stage] && !reopen {
-		return Repair{}, errs.New(errs.CodeValidation,
-			"repair %d is in terminal stage %q; reopening to %q requires explicit --reopen", id, current.Stage, stage)
-	}
-
-	ts := s.timestamp()
-	tx, commit, rollback, err := s.beginWrite(ctx)
-	if err != nil {
-		return Repair{}, err
-	}
-	defer rollback()
-
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE repairs SET stage=?, updated_at=? WHERE id=?`, stage, ts, id); err != nil {
-		return Repair{}, errs.Wrap(errs.CodeInternal, err, "cannot set repair stage")
-	}
-	action := "stage_change"
-	if terminalStages[current.Stage] {
-		action = "stage_reopen"
-	}
-	detail := map[string]any{"from": current.Stage, "to": stage}
-	if reopen {
-		detail["reopen"] = true
-	}
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO repair_activity(repair_id, actor, action, detail, created_at) VALUES(?,?,?,?,?)`,
-		id, actor, action, detailJSON(detail), ts); err != nil {
-		return Repair{}, errs.Wrap(errs.CodeInternal, err, "cannot record repair activity")
-	}
-	if err := commit(); err != nil {
-		return Repair{}, errs.Wrap(errs.CodeInternal, err, "cannot commit stage change")
-	}
-	return s.GetRepairRow(ctx, id)
+	return out, nil
 }
 
 // AddRepairEntry appends one work-log entry to a repair.

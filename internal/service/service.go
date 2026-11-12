@@ -423,13 +423,23 @@ func removeSystemd(o Options, name string) (*Result, error) {
 	} else if owner != name {
 		return nil, ownershipConflict("remove", unitPath, owner, name)
 	}
-	if err := systemctl("disable", "--now", unitFile); err == nil {
+	res := &Result{UnitPath: unitPath, Present: false, Active: "unknown"}
+	if err := systemctl("disable", "--now", unitFile); err != nil {
+		// Never delete a unit that is still running: the process would outlive
+		// its only stop handle and the shop would keep serving an orphan.
+		if active := statusOf(unitFile); active == "active" || active == "activating" || active == "reloading" {
+			return nil, errs.New(errs.CodeConflict,
+				"refusing to remove %s: the service is %s and did not stop (%v); run: systemctl --user disable --now %s",
+				unitPath, active, err, unitFile)
+		}
+		res.Warning = joinWarning(res.Warning, "could not disable the unit: "+err.Error())
+	} else {
 		defer func() { _ = systemctl("daemon-reload") }()
 	}
 	if err := os.Remove(unitPath); err != nil {
 		return nil, errs.Wrap(errs.CodeInternal, err, "cannot remove unit file")
 	}
-	return &Result{UnitPath: unitPath, Present: false, Active: "unknown"}, nil
+	return res, nil
 }
 
 func removeOpenRC(o Options, name string) (*Result, error) {
@@ -447,8 +457,18 @@ func removeOpenRC(o Options, name string) (*Result, error) {
 	} else if owner != name {
 		return nil, ownershipConflict("remove", unitPath, owner, name)
 	}
-	_ = openrcCommand("rc-service", name, "stop")
-	_ = openrcCommand("rc-update", "del", name, "default")
+	res := &Result{UnitPath: unitPath, Present: false, Active: "unknown"}
+	if err := openrcCommand("rc-service", name, "stop"); err != nil {
+		if state, _ := openrcStatus(name); state == "started" || state == "starting" {
+			return nil, errs.New(errs.CodeConflict,
+				"refusing to remove %s: the service is %s and did not stop (%v); run: %s rc-service %s stop",
+				unitPath, state, err, privilegeCommand(), name)
+		}
+		res.Warning = joinWarning(res.Warning, "stop failed: "+err.Error())
+	}
+	if err := openrcCommand("rc-update", "del", name, "default"); err != nil {
+		res.Warning = joinWarning(res.Warning, "could not remove the default runlevel entry: "+err.Error())
+	}
 	if err := os.Remove(unitPath); err != nil {
 		if needsPrivileges(err) {
 			return nil, errs.New(errs.CodePermission,
@@ -458,7 +478,7 @@ func removeOpenRC(o Options, name string) (*Result, error) {
 		}
 		return nil, errs.Wrap(errs.CodeInternal, err, "cannot remove OpenRC service script")
 	}
-	return &Result{UnitPath: unitPath, Present: false, Active: "unknown"}, nil
+	return res, nil
 }
 
 // renderUnit builds the least-privilege systemd user unit. The default instance

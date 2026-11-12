@@ -168,6 +168,13 @@ func (s *Service) q(ctx context.Context) queryer {
 	return s.db
 }
 
+// busyError reports SQLite's lock-wait timeout: another process held the write
+// lock longer than busy_timeout. It is a retryable conflict, not an internal
+// failure, and must not read as a bug.
+func busyError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "SQLITE_BUSY")
+}
+
 // beginWrite starts a write transaction or joins the ambient one. rollback is
 // safe to defer in both cases; commit only performs a real commit for the
 // transaction this call owns.
@@ -177,6 +184,9 @@ func (s *Service) beginWrite(ctx context.Context) (queryer, func() error, func()
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
+		if busyError(err) {
+			return nil, nil, nil, errs.New(errs.CodeConflict, "workspace is busy: another process is writing; retry")
+		}
 		return nil, nil, nil, errs.Wrap(errs.CodeInternal, err, "cannot begin transaction")
 	}
 	return tx, tx.Commit, func() { _ = tx.Rollback() }, nil
@@ -189,6 +199,9 @@ func (s *Service) InTx(ctx context.Context, fn func(ctx context.Context) error) 
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
+		if busyError(err) {
+			return errs.New(errs.CodeConflict, "workspace is busy: another process is writing; retry")
+		}
 		return errs.Wrap(errs.CodeInternal, err, "cannot begin transaction")
 	}
 	defer func() { _ = tx.Rollback() }()

@@ -121,38 +121,127 @@ func (m *Manifest) matchArtifact(goos, goarch string) (*Artifact, error) {
 		"release has no artifact for %s/%s (this build cannot update to it)", goos, goarch)
 }
 
-// CompareVersions compares dotted numeric versions (-1, 0, 1). Non-numeric
-// segments fall back to lexicographic comparison of that segment.
+// CompareVersions compares two semantic versions (-1, 0, 1). Core fields are
+// numeric with missing fields counting as zero. A prerelease (after the first
+// '-') sorts below the release it precedes, and its identifiers compare
+// numerically when both are numbers, so rc9 < rc10 and rc9.1 < 0.1.0. Build
+// metadata after '+' is ignored.
 func CompareVersions(a, b string) int {
-	as, bs := strings.Split(a, "."), strings.Split(b, ".")
-	for i := 0; i < len(as) || i < len(bs); i++ {
-		var x, y string
-		if i < len(as) {
-			x = as[i]
+	ac, ap := splitVersion(a)
+	bc, bp := splitVersion(b)
+	if c := compareCores(ac, bc); c != 0 {
+		return c
+	}
+	return comparePrerelease(ap, bp)
+}
+
+// splitVersion cuts a version into its dotted core and prerelease identifiers
+// and drops build metadata.
+func splitVersion(v string) (core, pre []string) {
+	if i := strings.IndexByte(v, '+'); i >= 0 {
+		v = v[:i]
+	}
+	head, tail, found := strings.Cut(v, "-")
+	if found && tail != "" {
+		pre = strings.Split(tail, ".")
+	}
+	return strings.Split(head, "."), pre
+}
+
+func compareCores(a, b []string) int {
+	for i := 0; i < len(a) || i < len(b); i++ {
+		x, y := "0", "0"
+		if i < len(a) {
+			x = a[i]
 		}
-		if i < len(bs) {
-			y = bs[i]
+		if i < len(b) {
+			y = b[i]
 		}
-		xi, xe := strconv.Atoi(x)
-		yi, ye := strconv.Atoi(y)
-		switch {
-		case xe == nil && ye == nil:
-			if xi != yi {
-				if xi < yi {
-					return -1
-				}
-				return 1
-			}
-		default:
-			if x != y {
-				if x < y {
-					return -1
-				}
-				return 1
-			}
+		if c := compareIdentifier(x, y); c != 0 {
+			return c
 		}
 	}
 	return 0
+}
+
+// comparePrerelease: no prerelease beats any prerelease; otherwise identifiers
+// compare left to right, and a shorter run loses when all its fields match.
+func comparePrerelease(a, b []string) int {
+	switch {
+	case len(a) == 0 && len(b) == 0:
+		return 0
+	case len(a) == 0:
+		return 1
+	case len(b) == 0:
+		return -1
+	}
+	for i := 0; ; i++ {
+		if i >= len(a) && i >= len(b) {
+			return 0
+		}
+		if i >= len(a) {
+			return -1
+		}
+		if i >= len(b) {
+			return 1
+		}
+		if c := compareIdentifier(a[i], b[i]); c != 0 {
+			return c
+		}
+	}
+}
+
+// compareIdentifier compares one dotted field: numeric fields numerically, a
+// numeric field before an alphanumeric one, then text lexicographically. Text
+// with the same prefix and trailing digits compares those digits numerically
+// (rc9 < rc10), so this project's rcN naming upgrades in order; strict semver
+// would sort rc10 below rc9 because it compares whole text identifiers.
+func compareIdentifier(x, y string) int {
+	xi, xe := strconv.Atoi(x)
+	yi, ye := strconv.Atoi(y)
+	switch {
+	case xe == nil && ye == nil:
+		if xi != yi {
+			if xi < yi {
+				return -1
+			}
+			return 1
+		}
+		return 0
+	case xe == nil:
+		return -1
+	case ye == nil:
+		return 1
+	}
+	xp, xn, xok := splitTrailingNumber(x)
+	yp, yn, yok := splitTrailingNumber(y)
+	if xok && yok && xp == yp {
+		switch {
+		case xn < yn:
+			return -1
+		case xn > yn:
+			return 1
+		}
+		return 0
+	}
+	return strings.Compare(x, y)
+}
+
+// splitTrailingNumber splits "rc10" into ("rc", 10, true). ok is false when the
+// identifier does not end in a digit.
+func splitTrailingNumber(s string) (prefix string, n int64, ok bool) {
+	i := len(s)
+	for i > 0 && s[i-1] >= '0' && s[i-1] <= '9' {
+		i--
+	}
+	if i == len(s) || i == 0 {
+		return s, 0, false
+	}
+	value, err := strconv.ParseInt(s[i:], 10, 64)
+	if err != nil {
+		return s, 0, false
+	}
+	return s[:i], value, true
 }
 
 // HashFile computes a regular file's SHA-256 and size without following a

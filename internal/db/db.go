@@ -10,6 +10,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,6 +31,17 @@ func Path(workspaceHome string) string {
 	return filepath.Join(workspaceHome, "data", DBFileName)
 }
 
+// dsn builds the driver DSN for a database file. The URI form is required to
+// pass `_txlock=immediate`: every BeginTx then takes SQLite's write lock up
+// front, so a transaction that reads a row and then writes it cannot interleave
+// with another process's commit. Without it a deferred transaction re-reads the
+// old snapshot and the write is lost (last-write-wins despite a revision check).
+func dsn(path string) string {
+	u := url.URL{Scheme: "file", Path: path}
+	u.RawQuery = "_txlock=immediate"
+	return u.String()
+}
+
 // Open opens (creating if needed) the database at path with the required
 // pragmas. The parent directory is created owner-only if absent (it is the
 // database's own directory); the file itself is created owner-only.
@@ -40,22 +52,37 @@ func Open(ctx context.Context, path string) (*sql.DB, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, errs.Wrap(errs.CodeInternal, err, "cannot create database directory")
 	}
-	handle, err := sql.Open(DriverName, path)
+	handle, err := sql.Open(DriverName, dsn(path))
 	if err != nil {
 		return nil, errs.Wrap(errs.CodeInternal, err, "cannot open database %q", path)
 	}
 	// One connection at a time: deterministic write serialization inside the
 	// process; cross-process concurrency is handled by busy_timeout.
 	handle.SetMaxOpenConns(1)
+	// busy_timeout comes first: the mode changes below need locks, and without
+	// a timeout a second process opening the same workspace fails instantly with
+	// "database is locked" instead of waiting for the writer to finish.
 	for _, pragma := range []string{
-		"PRAGMA foreign_keys = ON",
-		"PRAGMA journal_mode = WAL",
-		"PRAGMA synchronous = FULL",
 		"PRAGMA busy_timeout = 5000",
+		"PRAGMA foreign_keys = ON",
+		"PRAGMA synchronous = FULL",
 	} {
 		if _, err := handle.ExecContext(ctx, pragma); err != nil {
 			_ = handle.Close()
 			return nil, errs.Wrap(errs.CodeInternal, err, "cannot apply %s to %q", pragma, path)
+		}
+	}
+	// Switching an existing database to WAL takes an exclusive lock; skip it
+	// when another process already did, so a second open never fights.
+	var journalMode string
+	if err := handle.QueryRowContext(ctx, "PRAGMA journal_mode").Scan(&journalMode); err != nil {
+		_ = handle.Close()
+		return nil, errs.Wrap(errs.CodeInternal, err, "cannot read journal mode of %q", path)
+	}
+	if !strings.EqualFold(journalMode, "wal") {
+		if _, err := handle.ExecContext(ctx, "PRAGMA journal_mode = WAL"); err != nil {
+			_ = handle.Close()
+			return nil, errs.Wrap(errs.CodeInternal, err, "cannot apply PRAGMA journal_mode = WAL to %q", path)
 		}
 	}
 	if err := handle.PingContext(ctx); err != nil {

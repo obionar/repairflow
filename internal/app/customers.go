@@ -84,77 +84,80 @@ func (s *Service) GetCustomer(ctx context.Context, id int64) (Customer, error) {
 }
 
 // UpdateCustomer applies a patch under an optional stale-revision check and
-// records the exact changes in history.
+// records the exact changes in history. The row is read inside the write
+// transaction: a revision checked against an earlier read could pass while
+// another process commits in between, losing that write.
 func (s *Service) UpdateCustomer(ctx context.Context, actor string, id int64, patch CustomerPatch, wantRevision string) (Customer, error) {
 	actor, err := normalizeActor(actor)
 	if err != nil {
 		return Customer{}, err
 	}
-	current, err := s.GetCustomer(ctx, id)
-	if err != nil {
-		return Customer{}, err
-	}
-	if err := checkRevision(wantRevision, current.Revision, "customer"); err != nil {
-		return Customer{}, err
-	}
-
-	name, phone, email, address, notes := current.Name, current.Phone, current.Email, current.Address, current.Notes
-	changes := map[string]map[string]string{}
-	set := func(field string, target *string, value *string, max int, required bool) error {
-		if value == nil {
-			return nil
-		}
-		cleaned, err := validateText(field, *value, max, required)
+	var out Customer
+	err = s.InTx(ctx, func(ctx context.Context) error {
+		current, err := s.GetCustomer(ctx, id)
 		if err != nil {
 			return err
 		}
-		if cleaned != *target {
-			changes[field] = map[string]string{"from": *target, "to": cleaned}
-			*target = cleaned
+		if err := checkRevision(wantRevision, current.Revision, "customer"); err != nil {
+			return err
 		}
-		return nil
-	}
-	if err := set("name", &name, patch.Name, maxName, true); err != nil {
-		return Customer{}, err
-	}
-	if err := set("phone", &phone, patch.Phone, maxPhone, false); err != nil {
-		return Customer{}, err
-	}
-	if err := set("email", &email, patch.Email, maxEmail, false); err != nil {
-		return Customer{}, err
-	}
-	if err := set("address", &address, patch.Address, maxAddress, false); err != nil {
-		return Customer{}, err
-	}
-	if err := set("notes", &notes, patch.Notes, maxNotes, false); err != nil {
-		return Customer{}, err
-	}
 
-	ts := s.timestamp()
-	tx, commit, rollback, err := s.beginWrite(ctx)
+		name, phone, email, address, notes := current.Name, current.Phone, current.Email, current.Address, current.Notes
+		changes := map[string]map[string]string{}
+		set := func(field string, target *string, value *string, max int, required bool) error {
+			if value == nil {
+				return nil
+			}
+			cleaned, err := validateText(field, *value, max, required)
+			if err != nil {
+				return err
+			}
+			if cleaned != *target {
+				changes[field] = map[string]string{"from": *target, "to": cleaned}
+				*target = cleaned
+			}
+			return nil
+		}
+		for _, field := range []struct {
+			name     string
+			target   *string
+			value    *string
+			max      int
+			required bool
+		}{
+			{"name", &name, patch.Name, maxName, true},
+			{"phone", &phone, patch.Phone, maxPhone, false},
+			{"email", &email, patch.Email, maxEmail, false},
+			{"address", &address, patch.Address, maxAddress, false},
+			{"notes", &notes, patch.Notes, maxNotes, false},
+		} {
+			if err := set(field.name, field.target, field.value, field.max, field.required); err != nil {
+				return err
+			}
+		}
+
+		ts := s.timestamp()
+		if _, err := s.q(ctx).ExecContext(ctx,
+			`UPDATE customers SET name=?, phone=?, email=?, address=?, notes=?, updated_at=? WHERE id=?`,
+			name, phone, email, address, notes, ts, id); err != nil {
+			return errs.Wrap(errs.CodeInternal, err, "cannot update customer %d", id)
+		}
+		action := "update"
+		if len(changes) == 0 {
+			action = "update_noop"
+		}
+		if _, err := s.q(ctx).ExecContext(ctx,
+			`INSERT INTO customer_history(customer_id, actor, action, detail, created_at) VALUES(?,?,?,?,?)`,
+			id, actor, action, detailJSON(changes), ts); err != nil {
+			return errs.Wrap(errs.CodeInternal, err, "cannot record customer history")
+		}
+		out, err = s.GetCustomer(ctx, id)
+		return err
+	})
 	if err != nil {
 		return Customer{}, err
 	}
-	defer rollback()
-
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE customers SET name=?, phone=?, email=?, address=?, notes=?, updated_at=? WHERE id=?`,
-		name, phone, email, address, notes, ts, id); err != nil {
-		return Customer{}, errs.Wrap(errs.CodeInternal, err, "cannot update customer %d", id)
-	}
-	action := "update"
-	if len(changes) == 0 {
-		action = "update_noop"
-	}
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO customer_history(customer_id, actor, action, detail, created_at) VALUES(?,?,?,?,?)`,
-		id, actor, action, detailJSON(changes), ts); err != nil {
-		return Customer{}, errs.Wrap(errs.CodeInternal, err, "cannot record customer history")
-	}
-	if err := commit(); err != nil {
-		return Customer{}, errs.Wrap(errs.CodeInternal, err, "cannot commit customer update")
-	}
-	return s.GetCustomer(ctx, id)
+	return out, nil
 }
 
 // ListCustomers returns a stable page of customers (id descending), with an
