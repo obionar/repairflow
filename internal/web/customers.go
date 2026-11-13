@@ -36,11 +36,11 @@ func (s *Server) customerList(w http.ResponseWriter, r *http.Request, sess app.S
 		s.renderTemplate(w, r, "customers-results", sess, data)
 		return
 	}
-	s.render(w, r, "customers", "Customers", sess, data)
+	s.render(w, r, "customers", "customers.title", sess, data)
 }
 
 func (s *Server) customerNew(w http.ResponseWriter, r *http.Request, sess app.Session) {
-	s.render(w, r, "customer_new", "New customer", sess, map[string]any{"Form": customerForm{}})
+	s.render(w, r, "customer_new", "customer_new.title", sess, map[string]any{"Form": customerForm{}})
 }
 
 func (s *Server) customerCreate(w http.ResponseWriter, r *http.Request, sess app.Session) {
@@ -53,7 +53,7 @@ func (s *Server) customerCreate(w http.ResponseWriter, r *http.Request, sess app
 	})
 	if err != nil {
 		if draftable(err) {
-			s.renderStatus(w, r, "customer_new", "New customer", sess, err.Error(),
+			s.renderStatus(w, r, "customer_new", "customer_new.title", sess, s.flashText(r, err),
 				map[string]any{"Form": form}, statusOf(err))
 			return
 		}
@@ -85,7 +85,7 @@ func (s *Server) customerShow(w http.ResponseWriter, r *http.Request, sess app.S
 		s.renderError(w, r, sessView(sess), err, statusOf(err))
 		return
 	}
-	s.render(w, r, "customer", "Customer "+c.Name, sess, map[string]any{
+	s.render(w, r, "customer", s.pageTitle(r, "customer.title", c.Name), sess, map[string]any{
 		"Customer": c, "History": history, "Repairs": repairs, "Form": customerFormOf(c),
 	})
 }
@@ -141,7 +141,7 @@ func (s *Server) customerUpdate(w http.ResponseWriter, r *http.Request, sess app
 				form.Revision = c.Revision
 				form.Conflict = true
 			}
-			s.renderStatus(w, r, "customer", "Customer "+c.Name, sess, conflictMessage(err), map[string]any{
+			s.renderStatus(w, r, "customer", s.pageTitle(r, "customer.title", c.Name), sess, s.flashText(r, err), map[string]any{
 				"Customer": c, "History": history, "Repairs": repairs, "Form": form,
 			}, statusOf(err))
 			return

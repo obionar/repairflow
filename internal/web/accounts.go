@@ -78,7 +78,7 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request, sess app.Sess
 		s.renderError(w, r, sessView(sess), err, statusOf(err))
 		return
 	}
-	s.render(w, r, "dashboard", "Dashboard", sess, map[string]any{
+	s.render(w, r, "dashboard", "dashboard.title", sess, map[string]any{
 		"Customers": customers,
 		"Queues":    queues,
 	})

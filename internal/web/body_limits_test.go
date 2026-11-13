@@ -17,6 +17,7 @@ import (
 	"repairflow/internal/app"
 	"repairflow/internal/db"
 	"repairflow/internal/files"
+	"repairflow/internal/testutil"
 )
 
 type countingReader struct {
@@ -228,7 +229,7 @@ func TestSlowLoginBodyUsesReadDeadline(t *testing.T) {
 	_ = writer.Close()
 	elapsed := time.Since(started)
 	if result.err == nil {
-		defer result.resp.Body.Close()
+		defer testutil.Close(t, result.resp.Body)
 		if result.resp.StatusCode >= 200 && result.resp.StatusCode < 400 {
 			t.Fatalf("slow body unexpectedly succeeded: %s", result.resp.Status)
 		}

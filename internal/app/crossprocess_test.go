@@ -10,6 +10,7 @@ import (
 	"repairflow/internal/db"
 	"repairflow/internal/errs"
 	"repairflow/internal/files"
+	"repairflow/internal/testutil"
 )
 
 // twoServices opens one workspace twice. Two connections are what a second
@@ -23,7 +24,7 @@ func twoServices(t *testing.T) (*app.Service, *app.Service) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(func() { handle.Close() })
+		t.Cleanup(func() { testutil.Close(t, handle) })
 		if err := db.Migrate(context.Background(), handle); err != nil {
 			t.Fatal(err)
 		}

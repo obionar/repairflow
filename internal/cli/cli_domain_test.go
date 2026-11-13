@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"repairflow/internal/buildinfo"
+	"repairflow/internal/testutil"
 )
 
 // runEnv executes a command against a fixed environment map.
@@ -327,8 +328,8 @@ func TestAgentMediaIngestionFlow(t *testing.T) {
 	firmware := filepath.Join(stage, "dump.bin")
 	photoBytes := []byte("\xff\xd8\xff\xe0 staged photo bytes \x00\x01")
 	firmwareBytes := []byte("\x7fELF\x02\x01 firmware blob with \x00 NUL bytes")
-	os.WriteFile(photo, photoBytes, 0o600)
-	os.WriteFile(firmware, firmwareBytes, 0o600)
+	testutil.Must(t, os.WriteFile(photo, photoBytes, 0o600))
+	testutil.Must(t, os.WriteFile(firmware, firmwareBytes, 0o600))
 
 	c := dataOf(t, runEnv(t, env, append([]string{"customer", "add", "--name", "Phone Owner"}, base...)...))
 	tk := dataOf(t, runEnv(t, env, append([]string{"repair", "add", "--customer", itoa(int64(c["id"].(float64))),
@@ -554,15 +555,15 @@ func TestUpdateCLIWorkflow(t *testing.T) {
 
 	// Build a manifest for a fake artifact and sign it.
 	artifact := filepath.Join(dir, "artifact.bin")
-	os.WriteFile(artifact, []byte("new binary bytes"), 0o755)
+	testutil.Must(t, os.WriteFile(artifact, []byte("new binary bytes"), 0o755))
 	hash, size, err := hashAndSize(artifact)
 	if err != nil {
 		t.Fatal(err)
 	}
 	manifest := filepath.Join(dir, "manifest.json")
-	os.WriteFile(manifest, []byte(fmt.Sprintf(
+	testutil.Must(t, os.WriteFile(manifest, []byte(fmt.Sprintf(
 		`{"format_version":1,"channel":"stable","version":"9.9.9","created_at":"2026-11-10T00:00:00Z","artifacts":[{"os":"%s","arch":"%s","file":"artifact.bin","sha256":"%s","size_bytes":%d}]}`,
-		runtime.GOOS, runtime.GOARCH, hash, size)), 0o600)
+		runtime.GOOS, runtime.GOARCH, hash, size)), 0o600))
 	sigPath := filepath.Join(dir, "manifest.sig")
 	sg := runEnv(t, env, "update", "sign", "--key", filepath.Join(dir, "release-signing.key"),
 		"--manifest", manifest, "--out", sigPath, "--json")

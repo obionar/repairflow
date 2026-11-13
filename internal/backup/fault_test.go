@@ -10,6 +10,7 @@ import (
 
 	"repairflow/internal/backup"
 	"repairflow/internal/errs"
+	"repairflow/internal/testutil"
 )
 
 // Fault: backup destination not writable (simulated disk-full/permission
@@ -24,7 +25,7 @@ func TestBackupDestinationUnwritable(t *testing.T) {
 	if err := os.Chmod(destDir, 0o500); err != nil {
 		t.Fatal(err)
 	}
-	defer os.Chmod(destDir, 0o700)
+	defer func() { testutil.Must(t, os.Chmod(destDir, 0o700)) }()
 
 	dest := filepath.Join(destDir, "backup.rfbak")
 	_, err := backup.Create(context.Background(), src.home, dest, "tester")
@@ -50,7 +51,7 @@ func TestUnreadableAttachmentAbortsBackup(t *testing.T) {
 	if err := os.Chmod(file, 0o000); err != nil {
 		t.Fatal(err)
 	}
-	defer os.Chmod(file, 0o600)
+	defer func() { testutil.Must(t, os.Chmod(file, 0o600)) }()
 
 	_, err := backup.Create(context.Background(), src.home, filepath.Join(t.TempDir(), "b.rfbak"), "tester")
 	if err == nil {
@@ -110,9 +111,17 @@ func TestConcurrentAttachmentModifications(t *testing.T) {
 func TestBackupExcludesDisposableContent(t *testing.T) {
 	src := newWorkspace(t)
 	src.populated(t)
-	os.WriteFile(filepath.Join(src.home, "cache", "thumb.bin"), []byte("regenerable"), 0o600)
-	os.WriteFile(filepath.Join(src.home, "run", "upload-old.part"), []byte("stale"), 0o600)
-	os.WriteFile(filepath.Join(src.home, "logs", "app.log"), []byte("noise"), 0o600)
+	// The disposable files must really exist, or the "not in archive" check below
+	// proves nothing.
+	for path, body := range map[string]string{
+		"cache/thumb.bin":     "regenerable",
+		"run/upload-old.part": "stale",
+		"logs/app.log":        "noise",
+	} {
+		p := filepath.Join(src.home, filepath.FromSlash(path))
+		testutil.Must(t, os.MkdirAll(filepath.Dir(p), 0o700))
+		testutil.Must(t, os.WriteFile(p, []byte(body), 0o600))
+	}
 
 	archive := filepath.Join(t.TempDir(), "lean.rfbak")
 	res, err := backup.Create(context.Background(), src.home, archive, "tester")

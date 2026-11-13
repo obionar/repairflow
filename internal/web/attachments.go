@@ -32,7 +32,15 @@ func (s *Server) attachmentAdd(w http.ResponseWriter, r *http.Request, sess app.
 		}
 	}()
 	s.logger.Debug("attachment upload", "request_id", requestID(r.Context()), "repair_id", id)
-	entryID, _ := strconv.ParseInt(r.FormValue("entry_id"), 10, 64)
+	entryID := int64(0)
+	if raw := r.FormValue("entry_id"); raw != "" {
+		var err error
+		entryID, err = strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			s.postResult(w, r, sess, errs.New(errs.CodeValidation, "entry_id must be an integer"), "/repairs/"+itoa(id))
+			return
+		}
+	}
 	var reader io.Reader = file
 	_, err = s.svc.AddAttachment(r.Context(), actorOf(sess), id, entryID,
 		filepath.Base(header.Filename), reader, r.FormValue("caption"), "web")
@@ -142,11 +150,8 @@ func (s *Server) attachmentPurge(w http.ResponseWriter, r *http.Request, sess ap
 	id, err := pathID(r, "id")
 	var a app.Attachment
 	if err == nil {
-		if !app.CanPurge(sess.Role) {
-			err = errs.New(errs.CodePermission, "only administrators may purge attachments")
-		} else {
-			a, err = s.svc.Purge(r.Context(), actorOf(sess), id, r.FormValue("confirm") == "1")
-		}
+		// The route is registered admin-only; the role is checked by `authed`.
+		a, err = s.svc.Purge(r.Context(), actorOf(sess), id, r.FormValue("confirm") == "1")
 	}
 	s.postResult(w, r, sess, err, attachmentHome(a))
 }

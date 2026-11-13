@@ -243,6 +243,12 @@
     "action.attachment_purge": "Файл удалён безвозвратно",
     "action.pickup": "Получено",
     "action.archive": "Архивирован",
-    "action.unarchive": "Возвращён из архива"
+    "action.unarchive": "Возвращён из архива",
+    "repair.title": "Ремонт {0}",
+    "customer.title": "Клиент {0}",
+    "error.code.conflict": "Запись изменилась, пока вы её редактировали. Перезагрузите страницу и повторите изменение.",
+    "error.code.not_found": "Эта запись больше не существует.",
+    "error.code.permission_refused": "Вам не разрешено это действие.",
+    "error.code.internal_error": "На сервере произошёл сбой. Ничего не изменено."
   }
 }

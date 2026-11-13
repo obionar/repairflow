@@ -174,11 +174,11 @@ func (c Config) Validate() error {
 	if c.Web.Port < 1 || c.Web.Port > 65535 {
 		return errs.New(errs.CodeConfigInvalid, "web.port must be in 1-65535, got %d", c.Web.Port)
 	}
-	if !isLoopbackHost(c.Web.Host) && !c.Web.AllowRemote {
+	if !IsLoopbackHost(c.Web.Host) && !c.Web.AllowRemote {
 		return errs.New(errs.CodeConfigInvalid,
 			"web.host %q is not loopback; set web.allow_remote=true only after reviewing network exposure", c.Web.Host)
 	}
-	if !c.Web.AuthRequired && !isLoopbackHost(c.Web.Host) && !c.Web.AllowInsecureLAN {
+	if !c.Web.AuthRequired && !IsLoopbackHost(c.Web.Host) && !c.Web.AllowInsecureLAN {
 		return errs.New(errs.CodeConfigInvalid,
 			"web.auth_required=false is allowed only for loopback hosts; set web.allow_insecure_lan=true to serve an unauthenticated workspace to the LAN (testing only)")
 	}
@@ -205,11 +205,19 @@ func validLanguage(code string) bool {
 	return true
 }
 
-func isLoopbackHost(host string) bool {
-	if strings.EqualFold(strings.TrimSpace(host), "localhost") {
+// IsLoopbackHost reports whether a listen address or request host is
+// loopback-only. Accepts a bare host, an IPv6 literal in brackets and a
+// host:port form, so the config check and the request-host guard share one rule.
+func IsLoopbackHost(hostport string) bool {
+	host := hostport
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		host = h
+	}
+	host = strings.Trim(strings.TrimSpace(host), "[]")
+	if strings.EqualFold(host, "localhost") {
 		return true
 	}
-	ip := net.ParseIP(strings.Trim(strings.TrimSpace(host), "[]"))
+	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
 }
 

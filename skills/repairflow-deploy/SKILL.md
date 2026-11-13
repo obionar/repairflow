@@ -24,8 +24,8 @@ repairflow_Linux_arm64.tar.gz
 SHA256SUMS
 ```
 
-Each archive contains only `repairflow`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, `manifest.json`,
-`manifest.sig` and `update-github.sh`; `SHA256SUMS` covers the two archives. Do not upload loose
+Each archive contains only `repairflow`, `LICENSE`, `manifest.json`, `manifest.sig` and
+`update-github.sh`; `SHA256SUMS` covers the two archives. Do not upload loose
 binaries, README, source archives, demo scripts or manifests as release assets. The GitHub-generated
 source archives at the tag satisfy source availability. `make license-check` must pass before
 packaging.
@@ -36,9 +36,9 @@ offline and out of the repository, chat and logs.
 ## Copy and verify
 
 ```bash
-scp repairflow_Linux_x86_64.tar.gz SHA256SUMS technician@host:~/
-# on the target
-sha256sum -c SHA256SUMS --ignore-missing
+scp repairflow_Linux_x86_64.tar.gz repairflow_Linux_arm64.tar.gz SHA256SUMS technician@host:~/
+# on the target (both archives present: BusyBox sha256sum has no --ignore-missing)
+sha256sum -c SHA256SUMS
 tar -xzf repairflow_Linux_x86_64.tar.gz
 install -Dm0755 repairflow ~/.local/bin/repairflow
 install -Dm0755 update-github.sh ~/.local/bin/update-github.sh
@@ -51,8 +51,8 @@ that path and offline updates stage `<exe>.new` beside it.
 ## First run
 
 ```bash
-# disposable synthetic check
-./run-demo.sh
+# disposable synthetic check, from a source checkout
+./scripts/run-demo.sh
 
 # real workspace
 repairflow init --home /srv/repairflow
@@ -101,8 +101,8 @@ Signed GitHub update (exact tag, check first, then apply):
 
 The POSIX script downloads the exact architecture archive, rejects unsafe paths, verifies the signed
 manifest and artifact hash/size, and leaves service restart to the operator. Install the archive's
-`update-github.sh` beside the binary. Use `tar -xzf repairflow_Linux_x86_64.tar.gz` for offline
-updates; the extracted files are `manifest.json`, `manifest.sig` and `repairflow`.
+`update-github.sh` beside the binary. For an offline update, unpack the same archive and use the
+`manifest.json`, `manifest.sig` and `repairflow` it contains.
 
 Signed offline update:
 
@@ -127,5 +127,5 @@ Linux-only; other platforms must refuse.
   Tailscale/SSH or another TLS proxy is a host-level concern.
 - The workspace-owning OS account is the trust boundary; web roles are cooperative, not a sandbox.
 - Do not push, tag, publish or deploy without explicit owner authorization.
-- RepairFlow is AGPL-3.0-only; preserve `LICENSE` and `THIRD_PARTY_NOTICES.md` in every distributed
-  bundle. Do not relicense the project without the owner.
+- RepairFlow is AGPL-3.0-only; preserve `LICENSE` in every distributed bundle. Do not relicense the
+  project without the owner.

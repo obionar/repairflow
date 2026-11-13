@@ -67,6 +67,7 @@ parse input and render output. `internal/files` owns attachment paths and origin
 | `internal/web/templates/` | Server-rendered pages and stable selectors |
 | `internal/web/static/` | Embedded CSS and progressive-enhancement JavaScript |
 | `internal/i18n/` | Translation loading, fallback, plurals and catalogs |
+| `internal/testutil/` | Failure-fast helpers shared by test fixtures |
 | `tests/e2e/` | Real-binary Chromium workflows; separate Go module |
 | `tests/*.py` | Disposable CLI lifecycle and hostile-input smoke tests |
 

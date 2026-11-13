@@ -18,6 +18,7 @@ import (
 	"repairflow/internal/db"
 	"repairflow/internal/files"
 	"repairflow/internal/logging"
+	"repairflow/internal/testutil"
 	"repairflow/internal/web"
 )
 
@@ -39,7 +40,7 @@ func newWebWithLogger(t *testing.T, logger *slog.Logger) *webFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { handle.Close() })
+	t.Cleanup(func() { testutil.Close(t, handle) })
 	if err := db.Migrate(context.Background(), handle); err != nil {
 		t.Fatal(err)
 	}
@@ -473,10 +474,12 @@ func TestFullWebWorkflow(t *testing.T) {
 	var body bytes.Buffer
 	mw := multipart.NewWriter(&body)
 	fw, _ := mw.CreateFormFile("file", "photo ünïcode.jpg")
-	fw.Write([]byte{0xff, 0xd8, 0xff, 0x00, 0x01, 0xfe, 0xff})
-	mw.WriteField("caption", "web upload")
-	mw.WriteField("csrf_token", csrf)
-	mw.Close()
+	if _, err := fw.Write([]byte{0xff, 0xd8, 0xff, 0x00, 0x01, 0xfe, 0xff}); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Must(t, mw.WriteField("caption", "web upload"))
+	testutil.Must(t, mw.WriteField("csrf_token", csrf))
+	testutil.Close(t, mw)
 	req := httptest.NewRequest("POST", "http://web.test/repairs/1/attachments", &body)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	req.Header.Set("Origin", "http://web.test")
@@ -506,9 +509,11 @@ func TestFullWebWorkflow(t *testing.T) {
 	var body2 bytes.Buffer
 	mw2 := multipart.NewWriter(&body2)
 	fw2, _ := mw2.CreateFormFile("file", "firmware.bin")
-	fw2.Write([]byte{0x7f, 'E', 'L', 'F', 0x00, 0x01})
-	mw2.WriteField("csrf_token", csrf)
-	mw2.Close()
+	if _, err := fw2.Write([]byte{0x7f, 'E', 'L', 'F', 0x00, 0x01}); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Must(t, mw2.WriteField("csrf_token", csrf))
+	testutil.Close(t, mw2)
 	req2 := httptest.NewRequest("POST", "http://web.test/repairs/1/attachments", &body2)
 	req2.Header.Set("Content-Type", mw2.FormDataContentType())
 	req2.Header.Set("Origin", "http://web.test")
@@ -517,6 +522,23 @@ func TestFullWebWorkflow(t *testing.T) {
 	f.handler.ServeHTTP(rec2, req2)
 	if rec2.Code != http.StatusSeeOther {
 		t.Fatalf("binary upload: %d", rec2.Code)
+	}
+	// A malformed entry_id must be refused, not stored as an unlinked file.
+	var body3 bytes.Buffer
+	mw3 := multipart.NewWriter(&body3)
+	fw3, _ := mw3.CreateFormFile("file", "note.txt")
+	_, _ = fw3.Write([]byte("note"))
+	_ = mw3.WriteField("entry_id", "abc")
+	_ = mw3.WriteField("csrf_token", csrf)
+	_ = mw3.Close()
+	req3 := httptest.NewRequest("POST", "http://web.test/repairs/1/attachments", &body3)
+	req3.Header.Set("Content-Type", mw3.FormDataContentType())
+	req3.Header.Set("Origin", "http://web.test")
+	req3.AddCookie(tech)
+	rec3 := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec3, req3)
+	if rec3.Code != http.StatusBadRequest {
+		t.Fatalf("malformed entry_id must be a validation error, got %d", rec3.Code)
 	}
 	dl2 := httptest.NewRequest("GET", "http://web.test/attachments/2/download", nil)
 	dl2.AddCookie(tech)

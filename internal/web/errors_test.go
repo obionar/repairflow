@@ -43,7 +43,9 @@ func TestWebReadFailuresAreNotIgnored(t *testing.T) {
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("dashboard database failure must produce 500, got %d", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), "internal application error") || strings.Contains(rec.Body.String(), "sql: database is closed") {
+	// The page shows the translated generic sentence, never the SQL cause.
+	generic := srv.catalogFor(req).T("error.code.internal_error")
+	if !strings.Contains(rec.Body.String(), generic) || strings.Contains(rec.Body.String(), "sql: database is closed") {
 		t.Fatalf("internal response must be safe and generic: %q", rec.Body.String())
 	}
 	if !strings.Contains(logs.String(), "operation=request") || !strings.Contains(logs.String(), "database is closed") {

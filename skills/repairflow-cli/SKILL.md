@@ -11,13 +11,14 @@ Use the built `repairflow` binary from the repository root. The full contract is
 ## Intake workflow
 
 ```bash
-./repairflow init --home /absolute/disposable/ws
-CID=$(./repairflow --json customer add --name "Name" --home /absolute/disposable/ws | jq -r .data.id)
-TID=$(./repairflow --json repair add --customer "$CID" --device "Device" --issue "Symptom" \
-      --idempotency-key agent-request-0001 --home /absolute/disposable/ws | jq -r .data.id)
-./repairflow repair entry "$TID" --kind work --body "Work performed" --home /absolute/disposable/ws
-./repairflow repair stage "$TID" in_progress --home /absolute/disposable/ws
-./repairflow --json repair show "$TID" --home /absolute/disposable/ws
+WS=/absolute/disposable/ws
+./repairflow init --home "$WS"
+./repairflow customer add --name "Name" --home "$WS"          # note the customer id it prints
+./repairflow repair add --customer ID --device "Device" --issue "Symptom" \
+      --idempotency-key agent-request-0001 --home "$WS"
+./repairflow repair entry ID --kind work --body "Work performed" --home "$WS"
+./repairflow repair stage ID in_progress --home "$WS"
+./repairflow --json repair show ID --home "$WS"
 ```
 
 `--customer` is optional on `repair add`; omitting it creates an unassigned repair

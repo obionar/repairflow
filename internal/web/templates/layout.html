@@ -38,7 +38,7 @@
     <nav class="main-nav" id="main-navigation" aria-label="Main navigation">
       <a class="nav-dashboard-link" href="/" aria-label="{{$.Tr "nav.dashboard"}}" title="{{$.Tr "nav.dashboard"}}"{{if eq .Active "dashboard"}} aria-current="page"{{end}}>{{template "icon-dashboard"}}<span class="nav-label">{{$.Tr "nav.dashboard"}}</span></a>
       <a href="/customers" aria-label="{{$.Tr "nav.customers"}}" title="{{$.Tr "nav.customers"}}"{{if eq .Active "customers"}} aria-current="page"{{end}}>{{template "icon-customers"}}<span class="nav-label">{{$.Tr "nav.customers"}}</span></a>
-      <a href="/tickets" aria-label="{{$.Tr "nav.repairs"}}" title="{{$.Tr "nav.repairs"}}"{{if eq .Active "tickets"}} aria-current="page"{{end}}>{{template "icon-repairs"}}<span class="nav-label">{{$.Tr "nav.repairs"}}</span></a>
+      <a href="/repairs" aria-label="{{$.Tr "nav.repairs"}}" title="{{$.Tr "nav.repairs"}}"{{if eq .Active "tickets"}} aria-current="page"{{end}}>{{template "icon-repairs"}}<span class="nav-label">{{$.Tr "nav.repairs"}}</span></a>
       <a href="/settings" aria-label="{{$.Tr "nav.settings"}}" title="{{$.Tr "nav.settings"}}"{{if eq .Active "settings"}} aria-current="page"{{end}}>{{template "icon-settings"}}<span class="nav-label">{{$.Tr "nav.settings"}}</span></a>
       <div class="nav-account">
         <span id="userbox">{{.Session.Username}} ({{.Session.Role}})</span>

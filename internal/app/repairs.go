@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -287,7 +288,7 @@ func (s *Service) SetRepairStage(ctx context.Context, actor string, id int64, st
 			return errs.New(errs.CodeConflict, "repair %d is already in stage %q", id, stage)
 		}
 		allowed := transitions[current.Stage]
-		if !contains(allowed, stage) {
+		if !slices.Contains(allowed, stage) {
 			return errs.New(errs.CodeValidation,
 				"stage transition %q -> %q is not allowed (from %q: %v); reopening a terminal stage requires --reopen",
 				current.Stage, stage, current.Stage, allowed)
@@ -486,15 +487,6 @@ func (s *Service) listActivity(ctx context.Context, repairID int64) ([]Activity,
 		out = append(out, a)
 	}
 	return out, rows.Err()
-}
-
-func contains(items []string, want string) bool {
-	for _, it := range items {
-		if it == want {
-			return true
-		}
-	}
-	return false
 }
 
 // isForeignKeyViolation matches SQLite foreign-key constraint errors.

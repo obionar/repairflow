@@ -10,6 +10,7 @@ import (
 	"repairflow/internal/db"
 	"repairflow/internal/errs"
 	"repairflow/internal/files"
+	"repairflow/internal/testutil"
 )
 
 func reopenService(t *testing.T, home string) *app.Service {
@@ -18,7 +19,7 @@ func reopenService(t *testing.T, home string) *app.Service {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { handle.Close() })
+	t.Cleanup(func() { testutil.Close(t, handle) })
 	if err := db.Migrate(context.Background(), handle); err != nil {
 		t.Fatal(err)
 	}

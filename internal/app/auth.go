@@ -70,14 +70,13 @@ type User struct {
 // Session is an authenticated browser/API session (token is returned only at
 // creation; storage keeps its hash).
 type Session struct {
-	TokenHash  string `json:"-"`
-	CSRFToken  string `json:"csrf_token"`
-	UserID     int64  `json:"user_id"`
-	Username   string `json:"username,omitempty"`
-	Role       string `json:"role,omitempty"`
-	CreatedAt  string `json:"created_at"`
-	ExpiresAt  string `json:"expires_at"`
-	LastSeenAt string `json:"last_seen_at"`
+	TokenHash string `json:"-"`
+	CSRFToken string `json:"csrf_token"`
+	UserID    int64  `json:"user_id"`
+	Username  string `json:"username,omitempty"`
+	Role      string `json:"role,omitempty"`
+	CreatedAt string `json:"created_at"`
+	ExpiresAt string `json:"expires_at"`
 }
 
 // argon2id parameters (OWASP-aligned; m=64MB may be heavy on SBCs, so m=32MB).
@@ -125,8 +124,49 @@ func CheckPassword(stored, password string) bool {
 	if err != nil || len(salt) < 8 || len(want) < 16 || len(want) > 64 {
 		return false
 	}
-	got := argon2.IDKey([]byte(password), salt, argonTime, argonMemory, argonThreads, uint32(len(want)))
+	// The PHC parameter field is part of the hash, not decoration: a hash made
+	// with other Argon2 settings must still verify, and a future tuning must not
+	// lock out every existing account.
+	timeCost, memory, threads, ok := parseArgonParams(parts[2])
+	if !ok {
+		return false
+	}
+	got := argon2.IDKey([]byte(password), salt, timeCost, memory, threads, uint32(len(want)))
 	return subtle.ConstantTimeCompare(got, want) == 1
+}
+
+// parseArgonParams reads the "v=19,m=32768,t=3,p=2" PHC field. Unknown versions
+// and out-of-range parameters are refused rather than clamped.
+func parseArgonParams(field string) (timeCost, memory uint32, threads uint8, ok bool) {
+	seen := map[string]bool{}
+	for _, kv := range strings.Split(field, ",") {
+		k, v, found := strings.Cut(kv, "=")
+		n, err := strconv.ParseUint(v, 10, 32)
+		if !found || err != nil || seen[k] {
+			return 0, 0, 0, false
+		}
+		seen[k] = true
+		switch k {
+		case "v":
+			if n != 19 {
+				return 0, 0, 0, false
+			}
+		case "m":
+			memory = uint32(n)
+		case "t":
+			timeCost = uint32(n)
+		case "p":
+			threads = uint8(n)
+		}
+	}
+	if !seen["m"] || !seen["t"] || !seen["p"] || !seen["v"] {
+		return 0, 0, 0, false
+	}
+	// m is in KiB: accept 8 KiB to 1 GiB, and nonzero work and parallelism.
+	if memory < 8 || memory > 1<<20 || timeCost < 1 || timeCost > 64 || threads < 1 || threads > 64 {
+		return 0, 0, 0, false
+	}
+	return timeCost, memory, threads, true
 }
 
 // CreateUser adds a local operator account.
@@ -225,29 +265,33 @@ func (s *Service) SetUserActive(ctx context.Context, actor, callerRole, username
 	if callerRole != RoleAdmin {
 		return User{}, errs.New(errs.CodePermission, "only administrators may enable or disable operators")
 	}
-	u, _, err := s.userByName(ctx, username)
-	if err != nil {
-		return User{}, err
-	}
-	if u.Active == active {
-		return User{}, errs.New(errs.CodeConflict, "user %q is already %s", username, activeLabel(active))
-	}
-	if !active && u.Role == RoleAdmin {
-		var remaining int
-		if err := s.q(ctx).QueryRowContext(ctx,
-			`SELECT count(*) FROM users WHERE role = 'admin' AND active = 1 AND id <> ?`, u.ID).Scan(&remaining); err != nil {
-			return User{}, errs.Wrap(errs.CodeInternal, err, "cannot count active administrators")
+	var out User
+	err := s.InTx(ctx, func(ctx context.Context) error {
+		// The last-administrator guard lives inside the write transaction: a
+		// count taken before it lets two concurrent disables both pass and leave
+		// the workspace with no active admin.
+		u, _, err := s.userByName(ctx, username)
+		if err != nil {
+			return err
 		}
-		if remaining == 0 {
-			return User{}, errs.New(errs.CodeConflict, "cannot disable the last active administrator")
+		if u.Active == active {
+			return errs.New(errs.CodeConflict, "user %q is already %s", username, activeLabel(active))
 		}
-	}
-	ts := s.timestamp()
-	flag := 0
-	if active {
-		flag = 1
-	}
-	err = s.InTx(ctx, func(ctx context.Context) error {
+		if !active && u.Role == RoleAdmin {
+			var remaining int
+			if err := s.q(ctx).QueryRowContext(ctx,
+				`SELECT count(*) FROM users WHERE role = 'admin' AND active = 1 AND id <> ?`, u.ID).Scan(&remaining); err != nil {
+				return errs.Wrap(errs.CodeInternal, err, "cannot count active administrators")
+			}
+			if remaining == 0 {
+				return errs.New(errs.CodeConflict, "cannot disable the last active administrator")
+			}
+		}
+		ts := s.timestamp()
+		flag := 0
+		if active {
+			flag = 1
+		}
 		if _, err := s.q(ctx).ExecContext(ctx,
 			`UPDATE users SET active=?, updated_at=? WHERE id=?`, flag, ts, u.ID); err != nil {
 			return errs.Wrap(errs.CodeInternal, err, "cannot change user active state")
@@ -256,13 +300,14 @@ func (s *Service) SetUserActive(ctx context.Context, actor, callerRole, username
 			`UPDATE auth_sessions SET revoked_at=? WHERE user_id=? AND revoked_at=''`, ts, u.ID); err != nil {
 			return errs.Wrap(errs.CodeInternal, err, "cannot revoke sessions")
 		}
+		u.Active, u.UpdatedAt = active, ts
+		out = u
 		return nil
 	})
 	if err != nil {
 		return User{}, err
 	}
-	u.Active, u.UpdatedAt = active, ts
-	return u, nil
+	return out, nil
 }
 
 func activeLabel(active bool) string {
@@ -301,6 +346,8 @@ func (s *Service) Login(ctx context.Context, username, password string) (Session
 	expires := s.now().Add(SessionTTLS).Format(time.RFC3339)
 	sess := Session{TokenHash: tokenHash, CSRFToken: hex.EncodeToString(csrf), UserID: u.ID}
 	err = s.InTx(ctx, func(ctx context.Context) error {
+		// last_seen_at is NOT NULL and still carries the creation time; nothing
+		// reads it, so sliding sessions would need a real update path first.
 		_, err := s.q(ctx).ExecContext(ctx,
 			`INSERT INTO auth_sessions(token_hash, csrf_token, user_id, created_at, expires_at, last_seen_at)
 			 VALUES(?,?,?,?,?,?)`, sess.TokenHash, sess.CSRFToken, sess.UserID, ts, expires, ts)
@@ -312,7 +359,7 @@ func (s *Service) Login(ctx context.Context, username, password string) (Session
 	if err != nil {
 		return Session{}, "", err
 	}
-	sess.Username, sess.Role, sess.ExpiresAt, sess.CreatedAt, sess.LastSeenAt = u.Username, u.Role, expires, ts, ts
+	sess.Username, sess.Role, sess.ExpiresAt, sess.CreatedAt = u.Username, u.Role, expires, ts
 	return sess, token, nil
 }
 
@@ -320,12 +367,12 @@ func (s *Service) Login(ctx context.Context, username, password string) (Session
 func (s *Service) LookupSession(ctx context.Context, token string) (Session, error) {
 	var sess Session
 	err := s.q(ctx).QueryRowContext(ctx,
-		`SELECT s.token_hash, s.csrf_token, s.user_id, u.username, u.role, s.created_at, s.expires_at, s.last_seen_at
+		`SELECT s.token_hash, s.csrf_token, s.user_id, u.username, u.role, s.created_at, s.expires_at
 		 FROM auth_sessions s JOIN users u ON u.id = s.user_id
 		 WHERE s.token_hash = ? AND s.revoked_at = '' AND u.active = 1`,
 		sessionTokenHash(token)).
 		Scan(&sess.TokenHash, &sess.CSRFToken, &sess.UserID, &sess.Username, &sess.Role,
-			&sess.CreatedAt, &sess.ExpiresAt, &sess.LastSeenAt)
+			&sess.CreatedAt, &sess.ExpiresAt)
 	if err != nil {
 		return Session{}, errs.New(errs.CodeValidation, "not authenticated")
 	}

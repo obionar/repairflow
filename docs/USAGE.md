@@ -14,15 +14,17 @@ CLI operate on the same records and enforce the same domain rules.
 4. **Add parts and estimates.** Part lines have a description, quantity, unit, optional cost and
    price. Creating an estimate snapshots the active part lines; accepting a new estimate supersedes
    the previously accepted version.
-5. **Move the repair through its stages.** `new` → `in_progress` → `waiting_parts` → `lab_test` →
-   `customer_test` → `repaired` or `no_repair`. The workflow does not require every stage.
+5. **Move the repair through its stages.** A typical path is `new` → `in_progress` →
+   `waiting_parts` → `lab_test` → `customer_test` → `repaired` or `no_repair`; the workflow does not
+   require every stage, and [the CLI contract](CLI-CONTRACT.md) lists every allowed transition.
 6. **Record collection.** Pickup is separate from repair stage, so a repaired device can remain in
    the awaiting-pickup queue until handover.
 7. **Archive when appropriate.** Archived customers and repairs retain their records and history.
    Archived repairs remain visible in the list with an archived badge.
 
 Reopening `repaired` or `no_repair` work is explicit and audited. The dashboard shows open-work and
-awaiting-pickup queues; archived records do not appear in those queues.
+awaiting-pickup queues, including repairs without a customer; archived records do not appear in
+those queues.
 
 ### Repairs without a customer
 

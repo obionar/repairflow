@@ -10,6 +10,7 @@ import (
 
 	"repairflow/internal/errs"
 	"repairflow/internal/files"
+	"repairflow/internal/testutil"
 )
 
 // errReader fails after n bytes — simulates disk-full or I/O failure during
@@ -62,7 +63,7 @@ func TestUnwritableStagingFailsExplicitly(t *testing.T) {
 	if err := os.Chmod(runDir, 0o500); err != nil {
 		t.Fatal(err)
 	}
-	defer os.Chmod(runDir, 0o700) // so TempDir cleanup succeeds
+	defer func() { testutil.Must(t, os.Chmod(runDir, 0o700)) }() // so TempDir cleanup succeeds
 
 	_, err := store.Add(1, bytes.NewReader([]byte("data")), 0)
 	if err == nil {
@@ -82,7 +83,7 @@ func TestExportMissingFileClassified(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	os.Remove(filepath.Join(home, "files", "tickets", "1", stored.StorageName))
+	testutil.Must(t, os.Remove(filepath.Join(home, "files", "tickets", "1", stored.StorageName)))
 	_, _, err = store.Export(1, stored.StorageName, filepath.Join(home, "out.bin"), stored.SHA256)
 	if err == nil {
 		t.Fatal("export of missing bytes must fail")

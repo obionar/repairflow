@@ -13,7 +13,6 @@ ownership and the definition of done. [Architecture](ARCHITECTURE.md) explains d
 - `go-licenses` v1.6.0 for dependency and notice verification.
 - Chromium for browser end-to-end tests.
 - Python 3 for the optional CLI smoke scripts.
-- The tools invoked by `scripts/verify-all.sh` for the complete local gate.
 
 There is no CI or GitHub Actions gate. Local verification is required before submitting a change.
 
@@ -115,13 +114,13 @@ Then verify the compiled-dependency inventory, bundled notices and first-party a
 make license-check
 ```
 
-After changing dependencies or reviewed assets, regenerate `THIRD_PARTY_NOTICES.md` with
-`make licenses` and commit the result. New static/media assets must be reviewed and recorded in
-`licenses/first-party-assets.txt`. Unknown licenses, missing notices and unreviewed assets fail the
-check. Release archives include `LICENSE`, `THIRD_PARTY_NOTICES.md`, the signed manifest, the binary
-and `update-github.sh`; `SHA256SUMS` covers the platform archives. The release script refuses a
-missing or stale inventory. The browser-test-only module is reported separately under
-`dist/licenses/` and is not bundled with the application.
+After changing dependencies or reviewed assets, run `make license-check`. New static/media assets
+must be reviewed and recorded in `licenses/first-party-assets.txt`. Unknown or version-mismatched
+licenses and unreviewed assets fail the check; it writes no document, only reports under
+`dist/licenses/`. Release archives include `LICENSE`, the signed manifest, the binary and
+`update-github.sh`; `SHA256SUMS` covers the platform archives. The release script refuses a failed
+inventory. The browser-test-only module is reported separately under `dist/licenses/` and is not
+bundled with the application.
 
 ## Debugging
 

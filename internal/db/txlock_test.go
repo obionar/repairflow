@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"repairflow/internal/db"
+	"repairflow/internal/testutil"
 )
 
 // TestWriteTransactionsAreImmediate pins the property that closes the
@@ -21,7 +22,7 @@ func TestWriteTransactionsAreImmediate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer first.Close()
+	defer testutil.Close(t, first)
 	if err := db.Migrate(ctx, first); err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +30,7 @@ func TestWriteTransactionsAreImmediate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer second.Close()
+	defer testutil.Close(t, second)
 	// Keep the wait short so the test does not spend the production timeout.
 	if _, err := second.ExecContext(ctx, "PRAGMA busy_timeout = 100"); err != nil {
 		t.Fatal(err)
@@ -68,7 +69,7 @@ func TestOpenWaitsForAnotherProcess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer first.Close()
+	defer testutil.Close(t, first)
 	if err := db.Migrate(ctx, first); err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +84,7 @@ func TestOpenWaitsForAnotherProcess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second process must open a busy workspace: %v", err)
 	}
-	defer second.Close()
+	defer testutil.Close(t, second)
 	if err := tx.Rollback(); err != nil {
 		t.Fatal(err)
 	}

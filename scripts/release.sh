@@ -8,7 +8,7 @@
 #   repairflow_Linux_arm64.tar.gz
 #   SHA256SUMS
 #
-# Each archive contains only the binary, LICENSE, THIRD_PARTY_NOTICES.md, the
+# Each archive contains only the binary, LICENSE, the
 # signed manifest, manifest signature and update-github.sh. No loose binaries,
 # docs, demo launcher or source archive are published as release assets.
 # Refuses a dirty worktree, a -dev version and an existing output directory.
@@ -154,7 +154,6 @@ scripts/package-release.sh \
   --amd64 "$BUILD/repairflow-amd64" \
   --arm64 "$BUILD/repairflow-arm64" \
   --license LICENSE \
-  --notices THIRD_PARTY_NOTICES.md \
   --manifest "$BUILD/manifest.json" \
   --signature "$BUILD/manifest.sig" \
   --update-script scripts/update-github.sh

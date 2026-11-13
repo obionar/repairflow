@@ -34,7 +34,6 @@ func TestPackageReleaseWritesOnlyInstallableArchives(t *testing.T) {
 		"--amd64", amd64,
 		"--arm64", arm64,
 		"--license", write("LICENSE", "license fixture\n"),
-		"--notices", write("THIRD_PARTY_NOTICES.md", "notices fixture\n"),
 		"--manifest", write("manifest.json", `{"format_version":1}`+"\n"),
 		"--signature", write("manifest.sig", "signature fixture\n"),
 		"--update-script", write("update-github.sh", "#!/bin/sh\n"),
@@ -64,7 +63,6 @@ func TestPackageReleaseWritesOnlyInstallableArchives(t *testing.T) {
 	wantMembers := []string{
 		"repairflow",
 		"LICENSE",
-		"THIRD_PARTY_NOTICES.md",
 		"manifest.json",
 		"manifest.sig",
 		"update-github.sh",

@@ -237,6 +237,12 @@
     "action.attachment_purge": "Διαγράφηκε οριστικά αρχείο",
     "action.pickup": "Παραλήφθηκε",
     "action.archive": "Αρχειοθετήθηκε",
-    "action.unarchive": "Επαναφέρθηκε από αρχείο"
+    "action.unarchive": "Επαναφέρθηκε από αρχείο",
+    "repair.title": "Επισκευή {0}",
+    "customer.title": "Πελάτης {0}",
+    "error.code.conflict": "Η εγγραφή άλλαξε όσο την επεξεργαζόσασταν. Φορτώστε ξανά τη σελίδα και εφαρμόστε ξανά την αλλαγή.",
+    "error.code.not_found": "Η εγγραφή δεν υπάρχει πλέον.",
+    "error.code.permission_refused": "Δεν επιτρέπεται να το κάνετε αυτό.",
+    "error.code.internal_error": "Κάτι απέτυχε στον διακομιστή. Δεν άλλαξε τίποτα."
   }
 }

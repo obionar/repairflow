@@ -31,15 +31,10 @@ import (
 //  7. Keys persist for the life of the workspace and never contain payload
 //     data (only a SHA-256 fingerprint is stored).
 //
-// The same rules apply through every interface (CLI today, web/MCP later)
-// because they live in this service, not in an adapter.
+// The same rules apply through every interface (CLI and web both use these
+// service methods) because they live here, not in an adapter.
 
 var idempotencyKeyRe = regexp.MustCompile(`^[A-Za-z0-9_.\-]{8,128}$`)
-
-// IdempotentResult wraps a replayed-or-created entity result.
-type IdempotentResult struct {
-	Replayed bool `json:"replayed"`
-}
 
 // fingerprint builds the canonical request fingerprint from ordered fields.
 func fingerprint(operation string, fields ...string) string {

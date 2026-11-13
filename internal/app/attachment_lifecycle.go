@@ -16,22 +16,24 @@ func (s *Service) Detach(ctx context.Context, actor string, id int64) (Attachmen
 	if err != nil {
 		return Attachment{}, err
 	}
-	a, err := s.GetAttachment(ctx, id)
-	if err != nil {
-		return Attachment{}, err
-	}
-	if a.State != "attached" {
-		return Attachment{}, errs.New(errs.CodeConflict, "attachment %d is %s, not attached", id, a.State)
-	}
 	ts := s.timestamp()
 	purgeAfter := s.now().Add(PurgeGrace).Format(time.RFC3339)
 	err = s.InTx(ctx, func(ctx context.Context) error {
+		// The state check is part of the transaction: two concurrent detaches must
+		// not both write an audit entry and a purge deadline.
+		a, err := s.GetAttachment(ctx, id)
+		if err != nil {
+			return err
+		}
+		if a.State != "attached" {
+			return errs.New(errs.CodeConflict, "attachment %d is %s, not attached", id, a.State)
+		}
 		if _, err := s.q(ctx).ExecContext(ctx,
 			`UPDATE attachments SET state='detached', detached_at=?, purge_after=?, updated_at=? WHERE id=?`,
 			ts, purgeAfter, ts, id); err != nil {
 			return errs.Wrap(errs.CodeInternal, err, "cannot detach attachment")
 		}
-		_, err := s.q(ctx).ExecContext(ctx,
+		_, err = s.q(ctx).ExecContext(ctx,
 			`INSERT INTO repair_activity(repair_id, actor, action, detail, created_at) VALUES(?,?,?,?,?)`,
 			a.RepairID, actor, "attachment_detach", detailJSON(map[string]any{"attachment_id": id, "purge_after": purgeAfter}), ts)
 		return err
@@ -48,20 +50,20 @@ func (s *Service) Restore(ctx context.Context, actor string, id int64) (Attachme
 	if err != nil {
 		return Attachment{}, err
 	}
-	a, err := s.GetAttachment(ctx, id)
-	if err != nil {
-		return Attachment{}, err
-	}
-	if a.State != "detached" {
-		return Attachment{}, errs.New(errs.CodeConflict, "attachment %d is %s, not detached", id, a.State)
-	}
 	ts := s.timestamp()
 	err = s.InTx(ctx, func(ctx context.Context) error {
+		a, err := s.GetAttachment(ctx, id)
+		if err != nil {
+			return err
+		}
+		if a.State != "detached" {
+			return errs.New(errs.CodeConflict, "attachment %d is %s, not detached", id, a.State)
+		}
 		if _, err := s.q(ctx).ExecContext(ctx,
 			`UPDATE attachments SET state='attached', detached_at='', purge_after='', updated_at=? WHERE id=?`, ts, id); err != nil {
 			return errs.Wrap(errs.CodeInternal, err, "cannot restore attachment")
 		}
-		_, err := s.q(ctx).ExecContext(ctx,
+		_, err = s.q(ctx).ExecContext(ctx,
 			`INSERT INTO repair_activity(repair_id, actor, action, detail, created_at) VALUES(?,?,?,?,?)`,
 			a.RepairID, actor, "attachment_restore", detailJSON(map[string]any{"attachment_id": id}), ts)
 		return err

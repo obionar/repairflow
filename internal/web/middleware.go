@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -13,6 +12,7 @@ import (
 	"time"
 
 	"repairflow/internal/app"
+	"repairflow/internal/config"
 	"repairflow/internal/errs"
 )
 
@@ -56,19 +56,6 @@ func (w *responseWriter) Write(body []byte) (int, error) {
 // Unwrap preserves access to the underlying writer for ResponseController.
 func (w *responseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
-func hostIsLoopback(hostport string) bool {
-	host := hostport
-	if h, _, err := net.SplitHostPort(hostport); err == nil {
-		host = h
-	}
-	host = strings.Trim(strings.TrimSpace(host), "[]")
-	if strings.EqualFold(host, "localhost") {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
-}
-
 func (s *Server) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		started := time.Now()
@@ -83,7 +70,7 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		h.Set("Content-Security-Policy", contentSecurityPolicy)
 		if !s.applyRequestBodyLimit(tracked, r) {
 			// The request was refused before any form parsing or authentication work.
-		} else if s.loopbackOnly && !hostIsLoopback(r.Host) {
+		} else if s.loopbackOnly && !config.IsLoopbackHost(r.Host) {
 			s.renderError(tracked, r, nil, errs.New(errs.CodePermission, "request host is not allowed"), http.StatusForbidden)
 		} else if r.Method == http.MethodPost && !sameOrigin(r) {
 			s.renderError(tracked, r, nil, errs.New(errs.CodeValidation, "request origin does not match the host"), http.StatusForbidden)

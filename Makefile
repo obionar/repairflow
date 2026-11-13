@@ -43,10 +43,7 @@ fuzz:
 	$(GO) test -run=NONE -fuzz=FuzzParseGlobalFlags -fuzztime=15s ./internal/cli/
 	$(GO) test -run=NONE -fuzz=FuzzRun -fuzztime=25s ./internal/cli/
 
-# Generate or verify the compiled-dependency inventory and bundled notices.
-licenses:
-	python3 scripts/license_inventory.py write
-
+# Verify the compiled-dependency inventory and reviewed first-party assets.
 license-check:
 	python3 scripts/license_inventory.py check
 

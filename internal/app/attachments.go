@@ -217,24 +217,24 @@ func (s *Service) SetCaption(ctx context.Context, actor string, id int64, captio
 	if err != nil {
 		return Attachment{}, err
 	}
-	current, err := s.GetAttachment(ctx, id)
-	if err != nil {
-		return Attachment{}, err
-	}
-	if current.State == "purged" {
-		return Attachment{}, errs.New(errs.CodeConflict, "attachment %d is purged", id)
-	}
 	caption, err = validateText("caption", caption, 1000, false)
 	if err != nil {
 		return Attachment{}, err
 	}
 	ts := s.timestamp()
 	err = s.InTx(ctx, func(ctx context.Context) error {
+		current, err := s.GetAttachment(ctx, id)
+		if err != nil {
+			return err
+		}
+		if current.State == "purged" {
+			return errs.New(errs.CodeConflict, "attachment %d is purged", id)
+		}
 		if _, err := s.q(ctx).ExecContext(ctx,
 			`UPDATE attachments SET caption=?, updated_at=? WHERE id=?`, caption, ts, id); err != nil {
 			return errs.Wrap(errs.CodeInternal, err, "cannot update caption")
 		}
-		_, err := s.q(ctx).ExecContext(ctx,
+		_, err = s.q(ctx).ExecContext(ctx,
 			`INSERT INTO repair_activity(repair_id, actor, action, detail, created_at) VALUES(?,?,?,?,?)`,
 			current.RepairID, actor, "attachment_caption", detailJSON(map[string]any{
 				"attachment_id": id, "from": current.Caption, "to": caption,
@@ -263,24 +263,24 @@ func (s *Service) setEntryLink(ctx context.Context, actor string, id, entryID in
 	if err != nil {
 		return Attachment{}, err
 	}
-	a, err := s.GetAttachment(ctx, id)
-	if err != nil {
-		return Attachment{}, err
-	}
-	e, err := s.getEntry(ctx, entryID)
-	if err != nil {
-		return Attachment{}, err
-	}
-	if e.RepairID != a.RepairID {
-		return Attachment{}, errs.New(errs.CodeValidation,
-			"entry %d belongs to repair %d; attachments may only link inside their own repair (%d)", entryID, e.RepairID, a.RepairID)
-	}
 	ts := s.timestamp()
 	action := "attachment_unlink"
 	if link {
 		action = "attachment_link"
 	}
 	err = s.InTx(ctx, func(ctx context.Context) error {
+		a, err := s.GetAttachment(ctx, id)
+		if err != nil {
+			return err
+		}
+		e, err := s.getEntry(ctx, entryID)
+		if err != nil {
+			return err
+		}
+		if e.RepairID != a.RepairID {
+			return errs.New(errs.CodeValidation,
+				"entry %d belongs to repair %d; attachments may only link inside their own repair (%d)", entryID, e.RepairID, a.RepairID)
+		}
 		if link {
 			if _, err := s.q(ctx).ExecContext(ctx,
 				`INSERT OR IGNORE INTO attachment_links(attachment_id, entry_id, created_at) VALUES(?,?,?)`, id, entryID, ts); err != nil {
@@ -296,7 +296,7 @@ func (s *Service) setEntryLink(ctx context.Context, actor string, id, entryID in
 				return errs.New(errs.CodeConflict, "attachment %d is not linked to entry %d", id, entryID)
 			}
 		}
-		_, err := s.q(ctx).ExecContext(ctx,
+		_, err = s.q(ctx).ExecContext(ctx,
 			`INSERT INTO repair_activity(repair_id, actor, action, detail, created_at) VALUES(?,?,?,?,?)`,
 			a.RepairID, actor, action, detailJSON(map[string]any{"attachment_id": id, "entry_id": entryID}), ts)
 		return err

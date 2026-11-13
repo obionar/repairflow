@@ -3,13 +3,13 @@
 {{template "flash" .}}
 
 <section class="panel table-window dashboard-panel">
-  <div class="section-heading"><h2>{{$.Tr "dashboard.workbench"}}</h2><div class="section-links"><span>{{$.Pl "dashboard.open" .Data.Queues.OpenCount}}</span> · <a href="/tickets">{{$.Tr "dashboard.view_all_repairs"}}</a></div></div>
+  <div class="section-heading"><h2>{{$.Tr "dashboard.workbench"}}</h2><div class="section-links"><span>{{$.Pl "dashboard.open" .Data.Queues.OpenCount}}</span> · <a href="/repairs">{{$.Tr "dashboard.view_all_repairs"}}</a></div></div>
   {{if .Data.Queues.Workbench}}
   <div class="table-wrap" tabindex="0" role="region" aria-label="{{$.Tr "dashboard.recent_repairs"}}">
     <table id="ticket-table">
       <thead><tr><th scope="col">{{$.Tr "dashboard.col_repair"}}</th><th scope="col">{{$.Tr "dashboard.col_customer"}}</th><th scope="col">{{$.Tr "dashboard.col_status"}}</th><th scope="col">{{$.Tr "dashboard.col_created"}}</th></tr></thead>
       <tbody>{{range .Data.Queues.Workbench}}<tr>
-        <td data-label="Repair"><a class="record-link" href="/tickets/{{.ID}}"><span class="record-id">#{{.ID}}</span> <span class="record-title">{{.Device}}</span></a><span class="issue-line">{{.Issue}}</span></td>
+        <td data-label="Repair"><a class="record-link" href="/repairs/{{.ID}}"><span class="record-id">#{{.ID}}</span> <span class="record-title">{{.Device}}</span></a><span class="issue-line">{{.Issue}}</span></td>
         <td data-label="{{$.Tr "dashboard.col_customer"}}">{{if .Unassigned}}<span class="muted">{{$.Tr "common.unassigned"}}</span>{{else}}<a href="/customers/{{.CustomerID}}">{{.CustomerName}}</a>{{end}}</td>
         <td data-label="{{$.Tr "dashboard.col_status"}}"><span class="status-widget"><span class="stage {{.Stage}}">{{$.Tr (printf "stage.%s" .Stage)}}</span>{{if or .PickupAt .ArchivedAt (terminalStage .Stage)}}<span class="status-flags"><span class="status-flag{{if .PickupAt}} on{{end}}" title="{{$.Tr "repairs.picked_up"}}"><span class="dot" aria-hidden="true"></span>{{$.Tr "repairs.picked_up"}}</span>{{if .ArchivedAt}}<span class="status-flag on"><span class="dot" aria-hidden="true"></span>{{$.Tr "common.archived"}}</span>{{end}}</span>{{end}}</span></td>
         <td data-label="Created"><time datetime="{{.CreatedAt}}">{{date .CreatedAt}}</time></td>
@@ -26,7 +26,7 @@
     <table id="collection-table">
       <thead><tr><th scope="col">{{$.Tr "dashboard.col_repair"}}</th><th scope="col">{{$.Tr "dashboard.col_customer"}}</th><th scope="col">{{$.Tr "dashboard.col_outcome"}}</th><th scope="col">{{$.Tr "dashboard.col_updated"}}</th></tr></thead>
       <tbody>{{range .Data.Queues.ReadyForCollection}}<tr>
-        <td data-label="Repair"><a class="record-link" href="/tickets/{{.ID}}"><span class="record-id">#{{.ID}}</span> <span class="record-title">{{.Device}}</span></a><span class="issue-line">{{.Issue}}</span></td>
+        <td data-label="Repair"><a class="record-link" href="/repairs/{{.ID}}"><span class="record-id">#{{.ID}}</span> <span class="record-title">{{.Device}}</span></a><span class="issue-line">{{.Issue}}</span></td>
         <td data-label="{{$.Tr "dashboard.col_customer"}}">{{if .Unassigned}}<span class="muted">{{$.Tr "common.unassigned"}}</span>{{else}}<a href="/customers/{{.CustomerID}}">{{.CustomerName}}</a>{{end}}</td>
         <td data-label="{{$.Tr "dashboard.col_outcome"}}"><span class="stage {{.Stage}}">{{$.Tr (printf "stage.%s" .Stage)}}</span></td>
         <td data-label="Updated"><time datetime="{{.UpdatedAt}}">{{date .UpdatedAt}}</time></td>

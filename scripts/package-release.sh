@@ -7,15 +7,13 @@
 #   SHA256SUMS
 #
 # Each archive contains only:
-#   repairflow, LICENSE, THIRD_PARTY_NOTICES.md, manifest.json, manifest.sig,
-#   update-github.sh
+#   repairflow, LICENSE, manifest.json, manifest.sig, update-github.sh
 set -eu
 
 OUT=
 AMD64=
 ARM64=
 LICENSE=
-NOTICES=
 MANIFEST=
 SIGNATURE=
 UPDATE_SCRIPT=
@@ -23,7 +21,7 @@ UPDATE_SCRIPT=
 usage() {
   cat <<'EOF'
 Usage: scripts/package-release.sh --out DIR --amd64 PATH --arm64 PATH \
-  --license PATH --notices PATH --manifest PATH --signature PATH \
+  --license PATH --manifest PATH --signature PATH \
   --update-script PATH
 
 Writes repairflow_Linux_x86_64.tar.gz, repairflow_Linux_arm64.tar.gz and
@@ -42,7 +40,6 @@ while [ $# -gt 0 ]; do
     --amd64) AMD64=${2:?}; shift 2 ;;
     --arm64) ARM64=${2:?}; shift 2 ;;
     --license) LICENSE=${2:?}; shift 2 ;;
-    --notices) NOTICES=${2:?}; shift 2 ;;
     --manifest) MANIFEST=${2:?}; shift 2 ;;
     --signature) SIGNATURE=${2:?}; shift 2 ;;
     --update-script) UPDATE_SCRIPT=${2:?}; shift 2 ;;
@@ -51,11 +48,11 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-for value in "$OUT" "$AMD64" "$ARM64" "$LICENSE" "$NOTICES" "$MANIFEST" "$SIGNATURE" "$UPDATE_SCRIPT"; do
+for value in "$OUT" "$AMD64" "$ARM64" "$LICENSE" "$MANIFEST" "$SIGNATURE" "$UPDATE_SCRIPT"; do
   [ -n "$value" ] || fail "all arguments are required"
 done
 [ -d "$OUT" ] || fail "output directory does not exist: $OUT"
-for file in "$AMD64" "$ARM64" "$LICENSE" "$NOTICES" "$MANIFEST" "$SIGNATURE" "$UPDATE_SCRIPT"; do
+for file in "$AMD64" "$ARM64" "$LICENSE" "$MANIFEST" "$SIGNATURE" "$UPDATE_SCRIPT"; do
   [ -f "$file" ] && [ ! -L "$file" ] || fail "input is not a regular file: $file"
 done
 command -v tar >/dev/null 2>&1 || fail "tar is required"
@@ -73,13 +70,12 @@ stage_archive() {
   mkdir -p "$dir"
   install -m 0755 "$binary" "$dir/repairflow"
   install -m 0644 "$LICENSE" "$dir/LICENSE"
-  install -m 0644 "$NOTICES" "$dir/THIRD_PARTY_NOTICES.md"
   install -m 0644 "$MANIFEST" "$dir/manifest.json"
   install -m 0644 "$SIGNATURE" "$dir/manifest.sig"
   install -m 0755 "$UPDATE_SCRIPT" "$dir/update-github.sh"
   archive=$STAGE/repairflow_Linux_$label.tar.gz
   tar -czf "$archive" -C "$dir" \
-    repairflow LICENSE THIRD_PARTY_NOTICES.md manifest.json manifest.sig update-github.sh
+    repairflow LICENSE manifest.json manifest.sig update-github.sh
   chmod 0644 "$archive"
 }
 

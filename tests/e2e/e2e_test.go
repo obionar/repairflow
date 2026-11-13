@@ -67,7 +67,7 @@ func TestLoginLogoutAndSession(t *testing.T) {
 	if !strings.Contains(page.URL(), "/login") {
 		t.Fatalf("logout must land on login, got %s", page.URL())
 	}
-	must(page.Goto(f.base + "/tickets"))
+	must(page.Goto(f.base + "/repairs"))
 	if !strings.Contains(page.URL(), "/login") {
 		t.Fatal("session must be gone after logout")
 	}
@@ -93,7 +93,7 @@ func TestCustomerAndTicketWorkflow(t *testing.T) {
 	}
 
 	// Ticket.
-	must(page.Goto(f.base + "/tickets"))
+	must(page.Goto(f.base + "/repairs"))
 	mustErr(page.Click("#new-ticket"))
 	mustErr(page.Fill("#customer_name", "E2E Customer ünïcode"))
 	mustErr(page.Fill("#device", "E2E Device"))
@@ -182,11 +182,11 @@ func TestCustomerAndTicketWorkflow(t *testing.T) {
 	}
 
 	// Pickup filter: the collected repair appears only in the collected view.
-	must(page.Goto(f.base + "/tickets?picked_up=no"))
+	must(page.Goto(f.base + "/repairs?picked_up=no"))
 	if strings.Contains(pageContent(t, page), "E2E Device") {
 		t.Fatal("in-shop filter must exclude a collected repair")
 	}
-	must(page.Goto(f.base + "/tickets?picked_up=yes"))
+	must(page.Goto(f.base + "/repairs?picked_up=yes"))
 	if !strings.Contains(pageContent(t, page), "E2E Device") {
 		t.Fatal("picked-up filter must include a collected repair")
 	}
@@ -261,7 +261,7 @@ func TestGalleryUploadDownloadAndDetach(t *testing.T) {
 		t.Fatalf("jpeg must serve inline as image/jpeg, got %q (%v)", ct, headers)
 	}
 	// Return to the ticket page for the remaining flows.
-	must(page.Goto(f.base + "/tickets/1"))
+	must(page.Goto(f.base + "/repairs/1"))
 
 	// Caption edit persists.
 	t.Log("step: caption")
@@ -327,7 +327,7 @@ func TestRoleEnforcementInBrowser(t *testing.T) {
 	if !strings.Contains(textOf(t, page, "#error-heading"), "went wrong") {
 		t.Fatalf("viewer must be refused the customer form, got %s", page.URL())
 	}
-	must(page.Goto(f.base + "/tickets/1"))
+	must(page.Goto(f.base + "/repairs/1"))
 	if visible(page, "#entry-form button") {
 		t.Fatal("viewer must not see write controls")
 	}
@@ -376,7 +376,7 @@ func TestMobileViewportUsable(t *testing.T) {
 	}
 
 	// No horizontal overflow (layout must not require sideways scrolling).
-	must(page.Goto(f.base + "/tickets/1"))
+	must(page.Goto(f.base + "/repairs/1"))
 	overflow := must(page.Evaluate(`() => document.documentElement.scrollWidth - document.documentElement.clientWidth`))
 	if v, ok := overflow.(float64); ok && v > 2 {
 		t.Fatalf("horizontal overflow of %.0fpx at mobile width", v)
@@ -407,7 +407,7 @@ func TestFoldPanelStatePersists(t *testing.T) {
 	defer page.Close()
 	f.login(page, "tech")
 	f.createTicket(page)
-	must(page.Goto(f.base + "/tickets/1"))
+	must(page.Goto(f.base + "/repairs/1"))
 
 	mustErr(page.Click("#activity-panel > summary"))
 	must(page.WaitForSelector("#activity-panel[open]"))
@@ -444,8 +444,8 @@ func TestCoreWorkflowWithoutJavaScript(t *testing.T) {
 
 	// The CSS drawer remains usable without the enhancement script.
 	mustErr(page.Click("#navigation-menu > summary"))
-	must(page.WaitForSelector("#main-navigation a[href='/tickets']", playwright.PageWaitForSelectorOptions{State: playwright.WaitForSelectorStateVisible}))
-	if !visible(page, "#main-navigation a[href='/tickets']") {
+	must(page.WaitForSelector("#main-navigation a[href='/repairs']", playwright.PageWaitForSelectorOptions{State: playwright.WaitForSelectorStateVisible}))
+	if !visible(page, "#main-navigation a[href='/repairs']") {
 		t.Fatal("mobile navigation must work without JavaScript")
 	}
 
@@ -454,7 +454,7 @@ func TestCoreWorkflowWithoutJavaScript(t *testing.T) {
 	mustErr(page.Fill("#name", "No JS Customer"))
 	mustErr(page.Click("#customer-submit"))
 	must(page.WaitForSelector("#customer-heading"))
-	must(page.Goto(f.base + "/tickets"))
+	must(page.Goto(f.base + "/repairs"))
 	mustErr(page.Click("#new-ticket"))
 	mustErr(page.Fill("#customer_name", "No JS Customer"))
 	mustErr(page.Fill("#device", "No JS Device"))
@@ -513,7 +513,7 @@ func TestResponsiveNoHorizontalOverflow(t *testing.T) {
 	f.createTicket(page)
 	for _, width := range []int{360, 390, 768, 1280, 1440} {
 		mustErr(page.SetViewportSize(width, 900))
-		for _, path := range []string{"/", "/customers", "/customers/1", "/tickets", "/tickets/1", "/settings"} {
+		for _, path := range []string{"/", "/customers", "/customers/1", "/repairs", "/repairs/1", "/settings"} {
 			must(page.Goto(f.base + path))
 			overflow := must(page.Evaluate(`() => document.documentElement.scrollWidth - document.documentElement.clientWidth`))
 			if v, ok := overflow.(float64); ok && v > 1 {
@@ -532,7 +532,7 @@ func TestAccessibilityBasics(t *testing.T) {
 	f.login(page, "admin")
 	f.createTicket(page)
 
-	for _, path := range []string{"/", "/customers", "/customers/new", "/tickets", "/tickets/new", "/tickets/1", "/settings"} {
+	for _, path := range []string{"/", "/customers", "/customers/new", "/repairs", "/repairs/new", "/repairs/1", "/settings"} {
 		must(page.Goto(f.base + path))
 		audit := must(page.Evaluate(`() => {
 			const problems = [];
@@ -568,11 +568,11 @@ func TestErrorPageReadable(t *testing.T) {
 	defer page.Close()
 	f.login(page, "tech")
 
-	must(page.Goto(f.base + "/tickets/999999"))
+	must(page.Goto(f.base + "/repairs/999999"))
 	if !strings.Contains(textOf(t, page, "#error-heading"), "went wrong") {
 		t.Fatal("missing record must render the error page")
 	}
-	if !strings.Contains(textOf(t, page, "#error"), "does not exist") {
+	if !strings.Contains(textOf(t, page, "#error"), "no longer exists") {
 		t.Fatalf("error message: %q", textOf(t, page, "#error"))
 	}
 	// The error page links back into the application (recoverable UX).

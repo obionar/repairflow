@@ -20,6 +20,7 @@ import (
 	"repairflow/internal/db"
 	"repairflow/internal/errs"
 	"repairflow/internal/files"
+	"repairflow/internal/testutil"
 )
 
 // ---- helpers -------------------------------------------------------------
@@ -70,8 +71,12 @@ func (f *fixture) populated(t *testing.T) {
 	}
 	e1, _ := f.svc.AddRepairEntry(ctx, "tester", tk.ID, "work", "entry one")
 	e2, _ := f.svc.AddRepairEntry(ctx, "tester", tk.ID, "test", "entry two")
-	f.svc.AddRepairPart(ctx, "tester", tk.ID, app.PartInput{Description: "Part ü", QuantityMilli: 1500, UnitPriceCents: 999})
-	f.svc.CreateEstimate(ctx, "tester", tk.ID, app.EstimateInput{DiscountKind: "percent", DiscountValue: 10})
+	if _, err := f.svc.AddRepairPart(ctx, "tester", tk.ID, app.PartInput{Description: "Part ü", QuantityMilli: 1500, UnitPriceCents: 999}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.CreateEstimate(ctx, "tester", tk.ID, app.EstimateInput{DiscountKind: "percent", DiscountValue: 10}); err != nil {
+		t.Fatal(err)
+	}
 
 	// Unicode, spaces, unusual display names; binary payloads incl. NULs.
 	f.addAttachment(t, tk.ID, e1.ID, "IMG 2026 ünïcode (1).jpg", []byte{0xff, 0xd8, 0xff, 0x00, 0x01, 0xfe, 0xff})
@@ -126,7 +131,7 @@ func restoredWorkspace(t *testing.T, archive string) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { handle.Close() })
+	t.Cleanup(func() { testutil.Close(t, handle) })
 	return &fixture{home: dest, svc: app.New(handle).WithStore(files.New(dest)), db: handle}
 }
 
@@ -163,8 +168,10 @@ func TestPopulatedWorkspaceRoundtrip(t *testing.T) {
 			t.Fatal(err)
 		}
 		var buf bytes.Buffer
-		buf.ReadFrom(rc)
-		rc.Close()
+		if _, err := buf.ReadFrom(rc); err != nil {
+			t.Fatal(err)
+		}
+		testutil.Close(t, rc)
 		originals[a.SHA256] = buf.Bytes()
 	}
 
@@ -188,8 +195,10 @@ func TestPopulatedWorkspaceRoundtrip(t *testing.T) {
 			t.Fatalf("bytes for %s: %v", a.DisplayName, err)
 		}
 		var buf bytes.Buffer
-		buf.ReadFrom(rc)
-		rc.Close()
+		if _, err := buf.ReadFrom(rc); err != nil {
+			t.Fatal(err)
+		}
+		testutil.Close(t, rc)
 		sum := sha256.Sum256(buf.Bytes())
 		if hex.EncodeToString(sum[:]) != a.SHA256 {
 			t.Fatalf("attachment %q not byte-identical after restore", a.DisplayName)
@@ -233,7 +242,7 @@ func TestCorruptAndTruncatedArchivesRejected(t *testing.T) {
 
 	// Truncated archive.
 	trunc := filepath.Join(t.TempDir(), "trunc.rfbak")
-	os.WriteFile(trunc, data[:len(data)/2], 0o600)
+	testutil.Must(t, os.WriteFile(trunc, data[:len(data)/2], 0o600))
 	if _, err := backup.Verify(context.Background(), trunc); err == nil {
 		t.Fatal("truncated archive must be refused")
 	}
@@ -245,7 +254,7 @@ func TestCorruptAndTruncatedArchivesRejected(t *testing.T) {
 	corrupt := filepath.Join(t.TempDir(), "corrupt.rfbak")
 	bad := append([]byte(nil), data...)
 	bad[len(bad)/2] ^= 0xff
-	os.WriteFile(corrupt, bad, 0o600)
+	testutil.Must(t, os.WriteFile(corrupt, bad, 0o600))
 	if _, err := backup.Verify(context.Background(), corrupt); err == nil {
 		t.Fatal("corrupt archive must be refused")
 	}
@@ -272,25 +281,27 @@ func rebuildTampered(t *testing.T, srcPath, dstPath string) {
 		t.Fatal(err)
 	}
 	out, _ := os.Create(dstPath)
-	defer out.Close()
+	defer testutil.Close(t, out)
 	gz := gzip.NewWriter(out)
-	defer gz.Close()
+	defer testutil.Close(t, gz)
 	tw := tar.NewWriter(gz)
-	defer tw.Close()
+	defer testutil.Close(t, tw)
 
 	// Re-encode the manifest exactly as verified.
 	mjson, _ := json.MarshalIndent(manifest, "", "  ")
-	tw.WriteHeader(&tar.Header{Name: "manifest.json", Mode: 0o600, Size: int64(len(mjson))})
-	tw.Write(mjson)
+	testutil.Must(t, tw.WriteHeader(&tar.Header{Name: "manifest.json", Mode: 0o600, Size: int64(len(mjson))}))
+	if _, err := tw.Write(mjson); err != nil {
+		t.Fatal(err)
+	}
 
 	// Stream the original payload entries, flipping bytes in the database one.
 	f, _ := os.Open(srcPath)
-	defer f.Close()
+	defer testutil.Close(t, f)
 	gr, err := gzip.NewReader(f)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer gr.Close()
+	defer testutil.Close(t, gr)
 	tr := tar.NewReader(gr)
 	for {
 		hdr, err := tr.Next()
@@ -307,8 +318,10 @@ func rebuildTampered(t *testing.T, srcPath, dstPath string) {
 		if hdr.Name == "data/repairflow.db" {
 			body[100] ^= 0xff // forged bytes
 		}
-		tw.WriteHeader(&tar.Header{Name: hdr.Name, Mode: 0o600, Size: int64(len(body))})
-		tw.Write(body)
+		testutil.Must(t, tw.WriteHeader(&tar.Header{Name: hdr.Name, Mode: 0o600, Size: int64(len(body))}))
+		if _, err := tw.Write(body); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
@@ -318,7 +331,7 @@ func TestMissingAttachmentAbortsBackup(t *testing.T) {
 	src.populated(t)
 	atts, _ := src.svc.ListRepairAttachments(context.Background(), 1, true)
 	name, _ := src.svc.AttachmentStorageName(context.Background(), atts[0].ID)
-	os.Remove(filepath.Join(src.home, "files", "tickets", "1", name))
+	testutil.Must(t, os.Remove(filepath.Join(src.home, "files", "tickets", "1", name)))
 
 	archive := filepath.Join(t.TempDir(), "gap.rfbak")
 	_, err := backup.Create(context.Background(), src.home, archive, "tester")
@@ -340,7 +353,7 @@ func TestModifiedAttachmentAbortsBackup(t *testing.T) {
 	atts, _ := src.svc.ListRepairAttachments(context.Background(), 1, true)
 	name, _ := src.svc.AttachmentStorageName(context.Background(), atts[0].ID)
 	path := filepath.Join(src.home, "files", "tickets", "1", name)
-	os.WriteFile(path, []byte("tampered content"), 0o600)
+	testutil.Must(t, os.WriteFile(path, []byte("tampered content"), 0o600))
 
 	_, err := backup.Create(context.Background(), src.home, filepath.Join(t.TempDir(), "t.rfbak"), "tester")
 	if err == nil || !strings.Contains(err.Error(), "changed outside the application") {
@@ -362,8 +375,8 @@ func TestRestoreRefusesPopulatedWorkspace(t *testing.T) {
 	}
 	// An initialized-but-empty-looking workspace with a file also refused.
 	other := filepath.Join(t.TempDir(), "occupied")
-	os.MkdirAll(other, 0o700)
-	os.WriteFile(filepath.Join(other, "unrelated.txt"), []byte("x"), 0o600)
+	testutil.Must(t, os.MkdirAll(other, 0o700))
+	testutil.Must(t, os.WriteFile(filepath.Join(other, "unrelated.txt"), []byte("x"), 0o600))
 	if _, err := backup.Restore(context.Background(), archive, other); errs.CodeOf(err) != errs.CodeWorkspaceExists {
 		t.Fatalf("must refuse non-empty directory, got: %v", err)
 	}
@@ -391,7 +404,7 @@ func TestRestorePortableAndNonDestructive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer handle.Close()
+	defer testutil.Close(t, handle)
 	svc := app.New(handle).WithStore(files.New(dest))
 	if missing, orphans, err := svc.ReconcileAttachments(context.Background()); err != nil || len(missing) != 0 || len(orphans) != 0 {
 		t.Fatalf("portable restore reconcile: %v %v %v", missing, orphans, err)
@@ -415,7 +428,7 @@ func TestInterruptedRestoreLeavesCleanDestination(t *testing.T) {
 	corrupt := filepath.Join(t.TempDir(), "c.rfbak")
 	bad := append([]byte(nil), data...)
 	bad[len(bad)*2/3] ^= 0xff
-	os.WriteFile(corrupt, bad, 0o600)
+	testutil.Must(t, os.WriteFile(corrupt, bad, 0o600))
 
 	dest := filepath.Join(t.TempDir(), "damaged")
 	_, err := backup.Restore(context.Background(), corrupt, dest)

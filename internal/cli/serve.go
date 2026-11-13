@@ -2,9 +2,8 @@ package cli
 
 import (
 	"context"
-	"net"
-	"strings"
 
+	"repairflow/internal/config"
 	"repairflow/internal/db"
 	"repairflow/internal/errs"
 	"repairflow/internal/i18n"
@@ -57,7 +56,7 @@ func runServe(ctx context.Context, opts options, args []string, getenv Env) (any
 	}
 	srv.WithTranslations(tr, status.Config.UI.Language)
 	if !status.Config.Web.AuthRequired {
-		if !isLoopbackBind(status.Config.Web.Host) {
+		if !config.IsLoopbackHost(status.Config.Web.Host) {
 			opts.logger.Warn("SERVING WITHOUT AUTHENTICATION ON A NON-LOOPBACK ADDRESS: anyone who can reach this port has full write access (web.allow_insecure_lan, testing only)",
 				"operation", "serve", "host", status.Config.Web.Host, "port", status.Config.Web.Port)
 		} else {
@@ -72,16 +71,4 @@ func runServe(ctx context.Context, opts options, args []string, getenv Env) (any
 		return nil, err
 	}
 	return serveReport{Home: home, Host: status.Config.Web.Host, Port: status.Config.Web.Port}, nil
-}
-
-// isLoopbackBind reports whether a configured listen address is loopback-only.
-func isLoopbackBind(host string) bool {
-	h := strings.TrimSpace(host)
-	if strings.EqualFold(h, "localhost") {
-		return true
-	}
-	if ip := net.ParseIP(strings.Trim(h, "[]")); ip != nil {
-		return ip.IsLoopback()
-	}
-	return false
 }

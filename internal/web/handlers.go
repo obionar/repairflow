@@ -21,14 +21,6 @@ func draftable(err error) bool {
 	return false
 }
 
-// conflictMessage keeps raw revision hashes out of the operator-facing page.
-func conflictMessage(err error) string {
-	if errs.CodeOf(err) == errs.CodeConflict {
-		return "This record changed while you were editing. Compare the saved values below, then save again to apply your draft."
-	}
-	return err.Error()
-}
-
 func (s *Server) postResult(w http.ResponseWriter, r *http.Request, sess app.Session, err error, fallback string) {
 	if err != nil {
 		s.renderError(w, r, sessView(sess), err, statusOf(err))

@@ -237,6 +237,12 @@
     "action.attachment_purge": "File purged",
     "action.pickup": "Collected",
     "action.archive": "Archived",
-    "action.unarchive": "Unarchived"
+    "action.unarchive": "Unarchived",
+    "repair.title": "Repair {0}",
+    "customer.title": "Customer {0}",
+    "error.code.conflict": "This record changed while you were editing. Reload the page, then apply your change again.",
+    "error.code.not_found": "That record no longer exists.",
+    "error.code.permission_refused": "You are not allowed to do that.",
+    "error.code.internal_error": "Something failed on the server. Nothing was changed."
   }
 }

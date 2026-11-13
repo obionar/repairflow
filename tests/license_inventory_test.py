@@ -5,7 +5,6 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 import sys
-import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -70,39 +69,6 @@ class LicenseInventoryTests(unittest.TestCase):
                 "golang.org/x/sys/cpu,https://example.invalid/LICENSE,MIT\n",
                 VERSIONS,
             )
-
-    def test_render_includes_every_top_level_legal_notice(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            module = Path(tmp)
-            (module / "LICENSE").write_text("root license\n", encoding="utf-8")
-            (module / "PATENTS").write_text("patent grant\n", encoding="utf-8")
-            (module / "LICENSE-3RD-PARTY.md").write_text(
-                "nested third-party notices\n", encoding="utf-8"
-            )
-            (module / "main.go").write_text("package example\n", encoding="utf-8")
-            entry = license_inventory.ModuleLicense(
-                "example.com/module", "https://example.invalid/LICENSE", "BSD-3-Clause"
-            )
-            text = license_inventory.render_module(entry, "v1.0.0", module)
-            self.assertIn("### LICENSE\n", text)
-            self.assertIn("### PATENTS\n", text)
-            self.assertIn("### LICENSE-3RD-PARTY.md\n", text)
-            self.assertIn("root license", text)
-            self.assertIn("patent grant", text)
-            self.assertIn("nested third-party notices", text)
-            self.assertNotIn("package example", text)
-
-    def test_render_fence_is_longer_than_embedded_markdown_fences(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            module = Path(tmp)
-            (module / "LICENSE").write_text(
-                "before\n```text\nnested\n```\nafter\n", encoding="utf-8"
-            )
-            entry = license_inventory.ModuleLicense(
-                "example.com/module", "https://example.invalid/LICENSE", "BSD-3-Clause"
-            )
-            text = license_inventory.render_module(entry, "v1.0.0", module)
-            self.assertIn("````text\nbefore\n```text\nnested\n```\nafter\n````", text)
 
     def test_asset_review_rejects_new_and_missing_entries(self):
         reviewed = {"internal/web/static/favicon.svg", "internal/web/static/app.css"}

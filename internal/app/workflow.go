@@ -36,32 +36,30 @@ func (s *Service) SetRepairPickup(ctx context.Context, actor string, id int64, a
 	if err != nil {
 		return Repair{}, err
 	}
-	current, err := s.GetRepairRow(ctx, id)
-	if err != nil {
+	// The previous pickup values are read inside the write transaction, so the
+	// audit trail records the state this change actually replaced.
+	if err := s.InTx(ctx, func(ctx context.Context) error {
+		current, err := s.GetRepairRow(ctx, id)
+		if err != nil {
+			return err
+		}
+		ts := s.timestamp()
+		if _, err := s.q(ctx).ExecContext(ctx,
+			`UPDATE repairs SET pickup_at=?, picked_up_by=?, pickup_notes=?, updated_at=? WHERE id=?`,
+			at, by, notes, ts, id); err != nil {
+			return errs.Wrap(errs.CodeInternal, err, "cannot set pickup for repair %d", id)
+		}
+		detail := map[string]any{"at": at, "by": by, "notes": notes, "previous": map[string]string{
+			"at": current.PickupAt, "by": current.PickedUpBy, "notes": current.PickupNotes,
+		}}
+		if _, err := s.q(ctx).ExecContext(ctx,
+			`INSERT INTO repair_activity(repair_id, actor, action, detail, created_at) VALUES(?,?,?,?,?)`,
+			id, actor, "pickup", detailJSON(detail), ts); err != nil {
+			return errs.Wrap(errs.CodeInternal, err, "cannot record repair activity")
+		}
+		return nil
+	}); err != nil {
 		return Repair{}, err
-	}
-
-	ts := s.timestamp()
-	q, commit, rollback, err := s.beginWrite(ctx)
-	if err != nil {
-		return Repair{}, err
-	}
-	defer rollback()
-	if _, err := q.ExecContext(ctx,
-		`UPDATE repairs SET pickup_at=?, picked_up_by=?, pickup_notes=?, updated_at=? WHERE id=?`,
-		at, by, notes, ts, id); err != nil {
-		return Repair{}, errs.Wrap(errs.CodeInternal, err, "cannot set pickup for repair %d", id)
-	}
-	detail := map[string]any{"at": at, "by": by, "notes": notes, "previous": map[string]string{
-		"at": current.PickupAt, "by": current.PickedUpBy, "notes": current.PickupNotes,
-	}}
-	if _, err := q.ExecContext(ctx,
-		`INSERT INTO repair_activity(repair_id, actor, action, detail, created_at) VALUES(?,?,?,?,?)`,
-		id, actor, "pickup", detailJSON(detail), ts); err != nil {
-		return Repair{}, errs.Wrap(errs.CodeInternal, err, "cannot record repair activity")
-	}
-	if err := commit(); err != nil {
-		return Repair{}, errs.Wrap(errs.CodeInternal, err, "cannot commit pickup")
 	}
 	return s.GetRepairRow(ctx, id)
 }
@@ -74,54 +72,53 @@ func (s *Service) EditRepairEntry(ctx context.Context, actor string, entryID int
 	if err != nil {
 		return Entry{}, err
 	}
-	current, err := s.getEntry(ctx, entryID)
-	if err != nil {
-		return Entry{}, err
-	}
-	if current.DeletedAt != "" {
-		return Entry{}, errs.New(errs.CodeConflict, "entry %d is deleted; restore it before editing", entryID)
-	}
-
-	newKind, newBody := current.Kind, current.Body
-	if kind != nil {
-		if !entryKindSet[*kind] {
-			return Entry{}, errs.New(errs.CodeValidation, "unknown entry kind %q (valid: %v)", *kind, EntryKinds)
+	// Read-check-write in one transaction: a revision must always store the
+	// content this edit actually replaced, even with a concurrent editor.
+	if err := s.InTx(ctx, func(ctx context.Context) error {
+		current, err := s.getEntry(ctx, entryID)
+		if err != nil {
+			return err
 		}
-		newKind = *kind
-	}
-	if body != nil {
-		if newBody, err = validateText("body", *body, maxEntryBody, true); err != nil {
-			return Entry{}, err
+		if current.DeletedAt != "" {
+			return errs.New(errs.CodeConflict, "entry %d is deleted; restore it before editing", entryID)
 		}
-	}
-	if newKind == current.Kind && newBody == current.Body {
-		return Entry{}, errs.New(errs.CodeConflict, "entry %d is unchanged; nothing to edit", entryID)
-	}
 
-	ts := s.timestamp()
-	q, commit, rollback, err := s.beginWrite(ctx)
-	if err != nil {
+		newKind, newBody := current.Kind, current.Body
+		if kind != nil {
+			if !entryKindSet[*kind] {
+				return errs.New(errs.CodeValidation, "unknown entry kind %q (valid: %v)", *kind, EntryKinds)
+			}
+			newKind = *kind
+		}
+		if body != nil {
+			if newBody, err = validateText("body", *body, maxEntryBody, true); err != nil {
+				return err
+			}
+		}
+		if newKind == current.Kind && newBody == current.Body {
+			return errs.New(errs.CodeConflict, "entry %d is unchanged; nothing to edit", entryID)
+		}
+
+		ts := s.timestamp()
+		if _, err := s.q(ctx).ExecContext(ctx,
+			`INSERT INTO repair_entry_revisions(entry_id, actor, prev_kind, prev_body, prev_created_at, created_at)
+			 VALUES(?,?,?,?,?,?)`,
+			entryID, actor, current.Kind, current.Body, current.CreatedAt, ts); err != nil {
+			return errs.Wrap(errs.CodeInternal, err, "cannot store entry revision")
+		}
+		if _, err := s.q(ctx).ExecContext(ctx,
+			`UPDATE repair_entries SET kind=?, body=? WHERE id=?`, newKind, newBody, entryID); err != nil {
+			return errs.Wrap(errs.CodeInternal, err, "cannot edit entry %d", entryID)
+		}
+		detail := map[string]any{"entry_id": entryID, "from": map[string]string{"kind": current.Kind, "body": current.Body}, "to": map[string]string{"kind": newKind, "body": newBody}}
+		if _, err := s.q(ctx).ExecContext(ctx,
+			`INSERT INTO repair_activity(repair_id, actor, action, detail, created_at) VALUES(?,?,?,?,?)`,
+			current.RepairID, actor, "entry_edit", detailJSON(detail), ts); err != nil {
+			return errs.Wrap(errs.CodeInternal, err, "cannot record repair activity")
+		}
+		return nil
+	}); err != nil {
 		return Entry{}, err
-	}
-	defer rollback()
-	if _, err := q.ExecContext(ctx,
-		`INSERT INTO repair_entry_revisions(entry_id, actor, prev_kind, prev_body, prev_created_at, created_at)
-		 VALUES(?,?,?,?,?,?)`,
-		entryID, actor, current.Kind, current.Body, current.CreatedAt, ts); err != nil {
-		return Entry{}, errs.Wrap(errs.CodeInternal, err, "cannot store entry revision")
-	}
-	if _, err := q.ExecContext(ctx,
-		`UPDATE repair_entries SET kind=?, body=? WHERE id=?`, newKind, newBody, entryID); err != nil {
-		return Entry{}, errs.Wrap(errs.CodeInternal, err, "cannot edit entry %d", entryID)
-	}
-	detail := map[string]any{"entry_id": entryID, "from": map[string]string{"kind": current.Kind, "body": current.Body}, "to": map[string]string{"kind": newKind, "body": newBody}}
-	if _, err := q.ExecContext(ctx,
-		`INSERT INTO repair_activity(repair_id, actor, action, detail, created_at) VALUES(?,?,?,?,?)`,
-		current.RepairID, actor, "entry_edit", detailJSON(detail), ts); err != nil {
-		return Entry{}, errs.Wrap(errs.CodeInternal, err, "cannot record repair activity")
-	}
-	if err := commit(); err != nil {
-		return Entry{}, errs.Wrap(errs.CodeInternal, err, "cannot commit entry edit")
 	}
 	return s.getEntry(ctx, entryID)
 }
@@ -142,14 +139,6 @@ func (s *Service) setEntryDeleted(ctx context.Context, actor string, entryID int
 	if err != nil {
 		return Entry{}, err
 	}
-	current, err := s.getEntry(ctx, entryID)
-	if err != nil {
-		return Entry{}, err
-	}
-	if deleted == (current.DeletedAt != "") {
-		return Entry{}, errs.New(errs.CodeConflict, "entry %d is already %s", entryID, map[bool]string{true: "deleted", false: "active"}[deleted])
-	}
-
 	ts := s.timestamp()
 	value := ""
 	action := "entry_restore"
@@ -157,22 +146,28 @@ func (s *Service) setEntryDeleted(ctx context.Context, actor string, entryID int
 		value = ts
 		action = "entry_delete"
 	}
-	q, commit, rollback, err := s.beginWrite(ctx)
-	if err != nil {
+	// The already-deleted check belongs to the write transaction: two concurrent
+	// deletes must produce one state change and one audit entry, not two.
+	if err := s.InTx(ctx, func(ctx context.Context) error {
+		current, err := s.getEntry(ctx, entryID)
+		if err != nil {
+			return err
+		}
+		if deleted == (current.DeletedAt != "") {
+			return errs.New(errs.CodeConflict, "entry %d is already %s", entryID, map[bool]string{true: "deleted", false: "active"}[deleted])
+		}
+		if _, err := s.q(ctx).ExecContext(ctx,
+			`UPDATE repair_entries SET deleted_at=? WHERE id=?`, value, entryID); err != nil {
+			return errs.Wrap(errs.CodeInternal, err, "cannot update entry %d", entryID)
+		}
+		if _, err := s.q(ctx).ExecContext(ctx,
+			`INSERT INTO repair_activity(repair_id, actor, action, detail, created_at) VALUES(?,?,?,?,?)`,
+			current.RepairID, actor, action, detailJSON(map[string]any{"entry_id": entryID, "kind": current.Kind}), ts); err != nil {
+			return errs.Wrap(errs.CodeInternal, err, "cannot record repair activity")
+		}
+		return nil
+	}); err != nil {
 		return Entry{}, err
-	}
-	defer rollback()
-	if _, err := q.ExecContext(ctx,
-		`UPDATE repair_entries SET deleted_at=? WHERE id=?`, value, entryID); err != nil {
-		return Entry{}, errs.Wrap(errs.CodeInternal, err, "cannot update entry %d", entryID)
-	}
-	if _, err := q.ExecContext(ctx,
-		`INSERT INTO repair_activity(repair_id, actor, action, detail, created_at) VALUES(?,?,?,?,?)`,
-		current.RepairID, actor, action, detailJSON(map[string]any{"entry_id": entryID, "kind": current.Kind}), ts); err != nil {
-		return Entry{}, errs.Wrap(errs.CodeInternal, err, "cannot record repair activity")
-	}
-	if err := commit(); err != nil {
-		return Entry{}, errs.Wrap(errs.CodeInternal, err, "cannot commit entry state change")
 	}
 	return s.getEntry(ctx, entryID)
 }
@@ -207,13 +202,6 @@ func (s *Service) ArchiveCustomer(ctx context.Context, actor string, id int64, a
 	if err != nil {
 		return Customer{}, err
 	}
-	current, err := s.GetCustomer(ctx, id)
-	if err != nil {
-		return Customer{}, err
-	}
-	if archived == (current.ArchivedAt != "") {
-		return Customer{}, errs.New(errs.CodeConflict, "customer %d is already %s", id, map[bool]string{true: "archived", false: "active"}[archived])
-	}
 	ts := s.timestamp()
 	value := ""
 	action := "unarchive"
@@ -221,21 +209,27 @@ func (s *Service) ArchiveCustomer(ctx context.Context, actor string, id int64, a
 		value = ts
 		action = "archive"
 	}
-	q, commit, rollback, err := s.beginWrite(ctx)
-	if err != nil {
+	// State read and conflict check happen inside the write transaction, so two
+	// concurrent archives cannot both pass the "already archived" check.
+	if err := s.InTx(ctx, func(ctx context.Context) error {
+		current, err := s.GetCustomer(ctx, id)
+		if err != nil {
+			return err
+		}
+		if archived == (current.ArchivedAt != "") {
+			return errs.New(errs.CodeConflict, "customer %d is already %s", id, map[bool]string{true: "archived", false: "active"}[archived])
+		}
+		if _, err := s.q(ctx).ExecContext(ctx, `UPDATE customers SET archived_at=?, updated_at=? WHERE id=?`, value, ts, id); err != nil {
+			return errs.Wrap(errs.CodeInternal, err, "cannot archive customer %d", id)
+		}
+		if _, err := s.q(ctx).ExecContext(ctx,
+			`INSERT INTO customer_history(customer_id, actor, action, detail, created_at) VALUES(?,?,?,?,?)`,
+			id, actor, action, detailJSON(map[string]string{"name": current.Name}), ts); err != nil {
+			return errs.Wrap(errs.CodeInternal, err, "cannot record customer history")
+		}
+		return nil
+	}); err != nil {
 		return Customer{}, err
-	}
-	defer rollback()
-	if _, err := q.ExecContext(ctx, `UPDATE customers SET archived_at=?, updated_at=? WHERE id=?`, value, ts, id); err != nil {
-		return Customer{}, errs.Wrap(errs.CodeInternal, err, "cannot archive customer %d", id)
-	}
-	if _, err := q.ExecContext(ctx,
-		`INSERT INTO customer_history(customer_id, actor, action, detail, created_at) VALUES(?,?,?,?,?)`,
-		id, actor, action, detailJSON(map[string]string{"name": current.Name}), ts); err != nil {
-		return Customer{}, errs.Wrap(errs.CodeInternal, err, "cannot record customer history")
-	}
-	if err := commit(); err != nil {
-		return Customer{}, errs.Wrap(errs.CodeInternal, err, "cannot commit archive")
 	}
 	return s.GetCustomer(ctx, id)
 }
@@ -247,13 +241,6 @@ func (s *Service) ArchiveRepair(ctx context.Context, actor string, id int64, arc
 	if err != nil {
 		return Repair{}, err
 	}
-	current, err := s.GetRepairRow(ctx, id)
-	if err != nil {
-		return Repair{}, err
-	}
-	if archived == (current.ArchivedAt != "") {
-		return Repair{}, errs.New(errs.CodeConflict, "repair %d is already %s", id, map[bool]string{true: "archived", false: "active"}[archived])
-	}
 	ts := s.timestamp()
 	value := ""
 	action := "unarchive"
@@ -261,21 +248,27 @@ func (s *Service) ArchiveRepair(ctx context.Context, actor string, id int64, arc
 		value = ts
 		action = "archive"
 	}
-	q, commit, rollback, err := s.beginWrite(ctx)
-	if err != nil {
+	// State read and conflict check happen inside the write transaction, so two
+	// concurrent archives cannot both pass the "already archived" check.
+	if err := s.InTx(ctx, func(ctx context.Context) error {
+		current, err := s.GetRepairRow(ctx, id)
+		if err != nil {
+			return err
+		}
+		if archived == (current.ArchivedAt != "") {
+			return errs.New(errs.CodeConflict, "repair %d is already %s", id, map[bool]string{true: "archived", false: "active"}[archived])
+		}
+		if _, err := s.q(ctx).ExecContext(ctx, `UPDATE repairs SET archived_at=?, updated_at=? WHERE id=?`, value, ts, id); err != nil {
+			return errs.Wrap(errs.CodeInternal, err, "cannot archive repair %d", id)
+		}
+		if _, err := s.q(ctx).ExecContext(ctx,
+			`INSERT INTO repair_activity(repair_id, actor, action, detail, created_at) VALUES(?,?,?,?,?)`,
+			id, actor, action, detailJSON(map[string]string{"device": current.Device}), ts); err != nil {
+			return errs.Wrap(errs.CodeInternal, err, "cannot record repair activity")
+		}
+		return nil
+	}); err != nil {
 		return Repair{}, err
-	}
-	defer rollback()
-	if _, err := q.ExecContext(ctx, `UPDATE repairs SET archived_at=?, updated_at=? WHERE id=?`, value, ts, id); err != nil {
-		return Repair{}, errs.Wrap(errs.CodeInternal, err, "cannot archive repair %d", id)
-	}
-	if _, err := q.ExecContext(ctx,
-		`INSERT INTO repair_activity(repair_id, actor, action, detail, created_at) VALUES(?,?,?,?,?)`,
-		id, actor, action, detailJSON(map[string]string{"device": current.Device}), ts); err != nil {
-		return Repair{}, errs.Wrap(errs.CodeInternal, err, "cannot record repair activity")
-	}
-	if err := commit(); err != nil {
-		return Repair{}, errs.Wrap(errs.CodeInternal, err, "cannot commit archive")
 	}
 	return s.GetRepairRow(ctx, id)
 }

@@ -15,20 +15,17 @@ a workspace between machines.
 
 ## Copy and install
 
-Copy the archive for the target architecture and `SHA256SUMS`, then verify and extract it:
+Copy the archive for the target architecture and `SHA256SUMS` to the machine:
 
 ```bash
-sha256sum -c SHA256SUMS --ignore-missing
-tar -xzf repairflow_Linux_x86_64.tar.gz
-install -Dm0755 repairflow ~/.local/bin/repairflow
-install -Dm0755 update-github.sh ~/.local/bin/update-github.sh
-~/.local/bin/repairflow version
+scp repairflow_Linux_x86_64.tar.gz SHA256SUMS technician@host:~/
 ```
 
-Use `repairflow_Linux_arm64.tar.gz` on ARM64. Keep `LICENSE`, `THIRD_PARTY_NOTICES.md`,
-`manifest.json` and `manifest.sig` from the archive with the installation. Follow
-[Install and first run](INSTALL.md) to initialize a new workspace and create the first admin. To
-move existing records instead, use [Move a workspace](#move-a-workspace) below.
+Then verify, extract and install exactly as
+[Install and first run](INSTALL.md#install-the-executable) describes, and keep `LICENSE`,
+`manifest.json` and `manifest.sig` from the archive with the installation.
+Use the same guide to initialize a workspace and create the first admin; to move existing records
+instead, use [Move a workspace](#move-a-workspace) below.
 
 ## Reach the web interface remotely
 
@@ -88,15 +85,16 @@ repairflow config check
 Open the shown `https://HOST.TAILNET.ts.net/` address from another tailnet device. The LAN address
 should not expose port 8091.
 
-This setup has two application-level limits: all proxied requests share one login-throttle bucket,
-and the session cookie is not marked `Secure`. Tailscale provides the outer network access control;
-RepairFlow authentication remains mandatory.
+Two application limits apply behind the proxy — one shared login-throttle bucket and a session cookie
+that cannot be marked `Secure`; see [Security](SECURITY.md#remote-access). Tailscale provides the outer
+network access control; RepairFlow authentication remains mandatory.
 
 ### Unsafe LAN demo mode
 
 `web.allow_insecure_lan=true` permits `auth_required=false` on a non-loopback listener for temporary
-UI testing only. That combination has no login, no CSRF token and no TLS; anyone who can reach the
-port can read and modify the workspace. Never use it with real records or remote access enabled.
+UI testing only. It has no login, no CSRF token and no TLS. Read
+[Security](SECURITY.md#unauthenticated-lan-testing-mode) before using it; never use it with real
+records or remote access enabled.
 
 ## Run as a service
 

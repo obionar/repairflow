@@ -42,7 +42,7 @@ func TestParseQuantityMilli(t *testing.T) {
 			t.Errorf("ParseQuantityMilli(%q) = %d, %v; want %d", in, got, err, want)
 		}
 	}
-	for _, in := range []string{"0", "0.000", "-1", "1.2345", "", "x"} {
+	for _, in := range []string{"0", "0.000", "0.0001", "-1", "1.2345", "", "x"} {
 		if _, err := app.ParseQuantityMilli("qty", in); errs.CodeOf(err) != errs.CodeValidation {
 			t.Errorf("ParseQuantityMilli(%q) should be validation_error, got %v", in, err)
 		}
@@ -54,19 +54,15 @@ func TestRoundingRuleD203(t *testing.T) {
 	cases := []struct{ qtyMilli, price, want int64 }{
 		{1000, 1000, 1000}, // 1 x 10.00
 		{1500, 999, 1499},  // 1.5 x 9.99 = 14.985 -> 14.99 (half up)
-		{500, 1, 0},        // 0.5 x 0.01 = 0.005 -> 0.01? (0.005 rounds half up to 0.01)
+		{500, 1, 1},        // 0.5 x 0.01 = 0.005 -> 0.01 (half up)
+		{499, 1, 0},        // 0.499 x 0.01 = 0.00499 -> 0
 		{333, 333, 111},    // 0.333 x 3.33 = 1.10889 -> 1.11
 		{1000, 0, 0},       // free item
 		{3, 1, 0},          // 0.003 x 0.01 = 0.00003 -> 0
 	}
 	for _, c := range cases {
-		got := app.LineTotalCents(c.qtyMilli, c.price)
-		want := c.want
-		if c.qtyMilli == 500 && c.price == 1 {
-			want = 1 // 0.005 half-up -> 0.01
-		}
-		if got != want {
-			t.Errorf("LineTotalCents(%d,%d) = %d, want %d", c.qtyMilli, c.price, got, want)
+		if got := app.LineTotalCents(c.qtyMilli, c.price); got != c.want {
+			t.Errorf("LineTotalCents(%d,%d) = %d, want %d", c.qtyMilli, c.price, got, c.want)
 		}
 	}
 }

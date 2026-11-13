@@ -235,6 +235,12 @@
     "action.attachment_purge": "Dosya kalıcı silindi",
     "action.pickup": "Teslim alındı",
     "action.archive": "Arşivlendi",
-    "action.unarchive": "Arşivden çıkarıldı"
+    "action.unarchive": "Arşivden çıkarıldı",
+    "repair.title": "Onarım {0}",
+    "customer.title": "Müşteri {0}",
+    "error.code.conflict": "Bu kayıt siz düzenlerken değişti. Sayfayı yenileyip değişikliği tekrar uygulayın.",
+    "error.code.not_found": "Bu kayıt artık yok.",
+    "error.code.permission_refused": "Bunu yapma izniniz yok.",
+    "error.code.internal_error": "Sunucuda bir hata oluştu. Hiçbir şey değişmedi."
   }
 }

@@ -26,7 +26,9 @@ Screenshots from the demo workspace (`init --demo`), which carries entirely synt
   <img src="docs/screenshots/repairs-mobile.png" width="300" alt="Repair list on a phone">
 </p>
 
-The new-repair form with the customer picker: [docs/screenshots/repair-new.png](docs/screenshots/repair-new.png).
+The new-repair form with the customer picker:
+
+![New repair form with the customer picker](docs/screenshots/repair-new.png)
 
 ## What it does
 
@@ -56,8 +58,8 @@ port, but they are **not tested yet** and are not supported targets.
 Copyright (C) 2026 RepairFlow contributors.
 
 RepairFlow is licensed under **AGPL-3.0-only**; see [LICENSE](LICENSE). This includes source-sharing
-obligations for modified versions offered through a network interface. Third-party dependency
-licenses and required notices are collected in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+obligations for modified versions offered through a network interface. The compiled dependencies
+are BSD-3-Clause and MIT; `make license-check` verifies that inventory.
 
 ## Quick start
 

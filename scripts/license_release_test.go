@@ -40,7 +40,6 @@ func TestReleaseGateIncludesLicenseInventoryAndNotices(t *testing.T) {
 			"license_inventory.py check",
 			"scripts/package-release.sh",
 			"--license LICENSE",
-			"--notices THIRD_PARTY_NOTICES.md",
 		},
 		"verify-all.sh": {
 			"step_license_inventory",
@@ -48,7 +47,6 @@ func TestReleaseGateIncludesLicenseInventoryAndNotices(t *testing.T) {
 		},
 		"../Makefile": {
 			"license-check:",
-			"licenses:",
 		},
 	} {
 		body, err := os.ReadFile(name)

@@ -194,33 +194,32 @@ func (s *Service) setPartDeleted(ctx context.Context, actor string, partID int64
 	if err != nil {
 		return Part{}, err
 	}
-	current, err := s.GetRepairPart(ctx, partID)
-	if err != nil {
-		return Part{}, err
-	}
-	if deleted == (current.DeletedAt != "") {
-		return Part{}, errs.New(errs.CodeConflict, "part %d is already %s", partID, map[bool]string{true: "removed", false: "active"}[deleted])
-	}
 	ts := s.timestamp()
 	value, action := "", "part_restore"
 	if deleted {
 		value, action = ts, "part_remove"
 	}
-	q, commit, rollback, err := s.beginWrite(ctx)
-	if err != nil {
+	// The already-removed check runs inside the write transaction; a check taken
+	// before it lets two concurrent removals both write an audit entry.
+	if err := s.InTx(ctx, func(ctx context.Context) error {
+		current, err := s.GetRepairPart(ctx, partID)
+		if err != nil {
+			return err
+		}
+		if deleted == (current.DeletedAt != "") {
+			return errs.New(errs.CodeConflict, "part %d is already %s", partID, map[bool]string{true: "removed", false: "active"}[deleted])
+		}
+		if _, err := s.q(ctx).ExecContext(ctx, `UPDATE repair_parts SET deleted_at=?, updated_at=? WHERE id=?`, value, ts, partID); err != nil {
+			return errs.Wrap(errs.CodeInternal, err, "cannot update part %d", partID)
+		}
+		if _, err := s.q(ctx).ExecContext(ctx,
+			`INSERT INTO repair_activity(repair_id, actor, action, detail, created_at) VALUES(?,?,?,?,?)`,
+			current.RepairID, actor, action, detailJSON(map[string]any{"part_id": partID, "description": current.Description}), ts); err != nil {
+			return errs.Wrap(errs.CodeInternal, err, "cannot record repair activity")
+		}
+		return nil
+	}); err != nil {
 		return Part{}, err
-	}
-	defer rollback()
-	if _, err := q.ExecContext(ctx, `UPDATE repair_parts SET deleted_at=?, updated_at=? WHERE id=?`, value, ts, partID); err != nil {
-		return Part{}, errs.Wrap(errs.CodeInternal, err, "cannot update part %d", partID)
-	}
-	if _, err := q.ExecContext(ctx,
-		`INSERT INTO repair_activity(repair_id, actor, action, detail, created_at) VALUES(?,?,?,?,?)`,
-		current.RepairID, actor, action, detailJSON(map[string]any{"part_id": partID, "description": current.Description}), ts); err != nil {
-		return Part{}, errs.Wrap(errs.CodeInternal, err, "cannot record repair activity")
-	}
-	if err := commit(); err != nil {
-		return Part{}, errs.Wrap(errs.CodeInternal, err, "cannot commit part state change")
 	}
 	return s.GetRepairPart(ctx, partID)
 }

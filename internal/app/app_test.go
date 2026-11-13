@@ -16,6 +16,7 @@ import (
 	"repairflow/internal/db"
 	"repairflow/internal/errs"
 	"repairflow/internal/files"
+	"repairflow/internal/testutil"
 	"repairflow/internal/workspace"
 )
 
@@ -25,7 +26,7 @@ func newService(t *testing.T) *app.Service {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { handle.Close() })
+	t.Cleanup(func() { testutil.Close(t, handle) })
 	if err := db.Migrate(context.Background(), handle); err != nil {
 		t.Fatal(err)
 	}
@@ -367,7 +368,9 @@ func TestRepairListingFilters(t *testing.T) {
 	c2, _ := svc.CreateCustomer(ctx, "tester", app.CustomerInput{Name: "Two"})
 	t1, _ := svc.CreateRepair(ctx, "tester", app.RepairInput{CustomerID: c1.ID, Device: "Laptop", Issue: "dead"})
 	t2, _ := svc.CreateRepair(ctx, "tester", app.RepairInput{CustomerID: c2.ID, Device: "Phone", Issue: "cracked"})
-	svc.SetRepairStage(ctx, "tester", t2.ID, "in_progress", false)
+	if _, err := svc.SetRepairStage(ctx, "tester", t2.ID, "in_progress", false); err != nil {
+		t.Fatal(err)
+	}
 
 	if p, _ := svc.ListRepairs(ctx, app.RepairFilter{Stage: "in_progress"}); p.Total != 1 || p.Items[0].ID != t2.ID {
 		t.Fatalf("stage filter: %+v", p)
@@ -447,7 +450,7 @@ func TestConcurrentWriters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer handle.Close()
+	defer testutil.Close(t, handle)
 	if err := db.Migrate(ctx, handle); err != nil {
 		t.Fatal(err)
 	}
@@ -483,7 +486,7 @@ func TestSchemaRefusesNewerVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer handle.Close()
+	defer testutil.Close(t, handle)
 	if err := db.Migrate(ctx, handle); err != nil {
 		t.Fatal(err)
 	}
@@ -505,7 +508,7 @@ func TestDbOpenIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer h1.Close()
+	defer testutil.Close(t, h1)
 	if err := db.Migrate(ctx, h1); err != nil {
 		t.Fatal(err)
 	}
@@ -725,7 +728,9 @@ func TestEstimatesSnapshotAndAccept(t *testing.T) {
 
 	cost := int64(500)
 	p1, _ := svc.AddRepairPart(ctx, "tester", tk.ID, app.PartInput{Description: "Screen", QuantityMilli: 1000, UnitCostCents: &cost, UnitPriceCents: 8000})
-	svc.AddRepairPart(ctx, "tester", tk.ID, app.PartInput{Description: "Adhesive", QuantityMilli: 2000, UnitPriceCents: 250})
+	if _, err := svc.AddRepairPart(ctx, "tester", tk.ID, app.PartInput{Description: "Adhesive", QuantityMilli: 2000, UnitPriceCents: 250}); err != nil {
+		t.Fatal(err)
+	}
 
 	e1, err := svc.CreateEstimate(ctx, "tester", tk.ID, app.EstimateInput{DiscountKind: "percent", DiscountValue: 10})
 	if err != nil {
@@ -737,7 +742,9 @@ func TestEstimatesSnapshotAndAccept(t *testing.T) {
 	}
 
 	// Snapshot immutability: later part price changes do NOT touch it.
-	svc.UpdateRepairPart(ctx, "tester", p1.ID, app.PartPatch{UnitPriceCents: ptr(int64(99999))}, "")
+	if _, err := svc.UpdateRepairPart(ctx, "tester", p1.ID, app.PartPatch{UnitPriceCents: ptr(int64(99999))}, ""); err != nil {
+		t.Fatal(err)
+	}
 	again, _ := svc.GetEstimate(ctx, e1.ID)
 	if again.TotalCents != 7650 || again.Lines[0].UnitPriceCents != 8000 {
 		t.Fatalf("estimate mutated after part change: %+v", again)
@@ -792,7 +799,7 @@ func newAttachmentService(t *testing.T) (*app.Service, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { handle.Close() })
+	t.Cleanup(func() { testutil.Close(t, handle) })
 	if err := db.Migrate(context.Background(), handle); err != nil {
 		t.Fatal(err)
 	}
@@ -828,7 +835,7 @@ func TestAttachmentLifecycle(t *testing.T) {
 		t.Fatalf("open bytes: %v", err)
 	}
 	got, _ := io.ReadAll(rc)
-	rc.Close()
+	testutil.Close(t, rc)
 	if !bytes.Equal(got, payload) || meta.SHA256 != a.SHA256 {
 		t.Fatal("bytes/hash mismatch on retrieval")
 	}
@@ -906,7 +913,9 @@ func TestAttachmentRetentionGraceAndPurge(t *testing.T) {
 	if _, err := svc.Restore(ctx, "tester", a.ID); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
-	svc.Detach(ctx, "tester", a.ID)
+	if _, err := svc.Detach(ctx, "tester", a.ID); err != nil {
+		t.Fatal(err)
+	}
 
 	// After the grace period, explicit purge destroys bytes but keeps the
 	// audited metadata row.
@@ -1029,9 +1038,11 @@ func TestCrashBeforeCommitRollsBack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tx.Exec(`INSERT INTO customers(name, created_at, updated_at) VALUES('Ghost', 'x', 'y')`)
+	if _, err := tx.Exec(`INSERT INTO customers(name, created_at, updated_at) VALUES('Ghost', 'x', 'y')`); err != nil {
+		t.Fatal(err)
+	}
 	// crash: neither commit nor rollback; just drop the connection.
-	handle.Close()
+	testutil.Close(t, handle)
 
 	svc2 := reopenService(t, home)
 	if p, _ := svc2.ListCustomers(ctx, app.CustomerFilter{}); p.Total != 0 {
@@ -1075,14 +1086,14 @@ func TestWorkspaceCleanupNeverTouchesUserData(t *testing.T) {
 	}
 	stale := filepath.Join(home, "run", "upload-stale.part")
 	fresh := filepath.Join(home, "run", "upload-fresh.part")
-	os.WriteFile(stale, []byte("stale"), 0o600)
-	os.WriteFile(fresh, []byte("fresh"), 0o600)
+	testutil.Must(t, os.WriteFile(stale, []byte("stale"), 0o600))
+	testutil.Must(t, os.WriteFile(fresh, []byte("fresh"), 0o600))
 	old := time.Now().Add(-2 * time.Hour)
-	os.Chtimes(stale, old, old)
-	os.WriteFile(filepath.Join(home, "cache", "thumb"), []byte("c"), 0o600)
+	testutil.Must(t, os.Chtimes(stale, old, old))
+	testutil.Must(t, os.WriteFile(filepath.Join(home, "cache", "thumb"), []byte("c"), 0o600))
 	userFile := filepath.Join(home, "files", "tickets", "1", strings.Repeat("a", 32))
-	os.MkdirAll(filepath.Dir(userFile), 0o700)
-	os.WriteFile(userFile, []byte("user bytes"), 0o600)
+	testutil.Must(t, os.MkdirAll(filepath.Dir(userFile), 0o700))
+	testutil.Must(t, os.WriteFile(userFile, []byte("user bytes"), 0o600))
 
 	res, err := workspace.Cleanup(home)
 	if err != nil {
@@ -1141,7 +1152,7 @@ func TestAttachmentPreviewBounds(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := io.ReadAll(rc)
-	rc.Close()
+	testutil.Close(t, rc)
 	if err != nil || !bytes.Equal(got, big) {
 		t.Fatalf("original bytes must be unchanged: len=%d err=%v", len(got), err)
 	}

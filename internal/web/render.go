@@ -97,6 +97,41 @@ func (s *Server) renderStatus(w http.ResponseWriter, r *http.Request, name, titl
 }
 
 // activeFor maps a page template to the navigation section it belongs to.
+// webErrorKey maps an error code to the sentence the operator is shown.
+// Validation and usage messages name the field to fix, so they keep their own
+// text; every other class gets one translated sentence instead of Go internals.
+func webErrorKey(code errs.Code) (string, bool) {
+	switch code {
+	case errs.CodeConflict:
+		return "error.code.conflict", true
+	case errs.CodeNotFound:
+		return "error.code.not_found", true
+	case errs.CodePermission, errs.CodeUnsafePath:
+		return "error.code.permission_refused", true
+	case errs.CodeInternal:
+		return "error.code.internal_error", true
+	}
+	return "", false
+}
+
+// flashText is the message shown above a form that was rejected.
+func (s *Server) flashText(r *http.Request, err error) string {
+	if key, ok := webErrorKey(errs.CodeOf(err)); ok {
+		return s.catalogFor(r).T(key)
+	}
+	return err.Error()
+}
+
+// pageTitle resolves a catalog title key with its arguments; an unknown key is
+// shown as-is rather than as a missing-key placeholder.
+func (s *Server) pageTitle(r *http.Request, key string, args ...any) string {
+	cat := s.catalogFor(r)
+	if cat.Has(key) {
+		return cat.T(key, args...)
+	}
+	return key
+}
+
 func activeFor(name string) string {
 	switch name {
 	case "customers", "customer", "customer_new":
@@ -111,9 +146,12 @@ func activeFor(name string) string {
 }
 
 func (s *Server) renderError(w http.ResponseWriter, r *http.Request, sess *sessionView, err error, status int) {
+	cat := s.catalogFor(r)
 	message := err.Error()
+	if key, ok := webErrorKey(errs.CodeOf(err)); ok {
+		message = cat.T(key)
+	}
 	if errs.CodeOf(err) == errs.CodeInternal {
-		message = "internal application error"
 		s.logError(r, "request", err)
 	} else {
 		s.logger.Debug("request rejected", "request_id", requestID(r.Context()),
@@ -121,7 +159,6 @@ func (s *Server) renderError(w http.ResponseWriter, r *http.Request, sess *sessi
 	}
 	w.Header().Set("Content-Security-Policy", contentSecurityPolicy)
 	w.WriteHeader(status)
-	cat := s.catalogFor(r)
 	view := pageView{Title: cat.T("error.title"), Session: sess, Error: message,
 		Lang: cat.Code, Languages: s.tr.Languages(), T: cat.T, N: cat.N}
 	if renderErr := s.tmpl.ExecuteTemplate(w, "error.html", view); renderErr != nil {

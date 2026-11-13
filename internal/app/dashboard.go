@@ -31,7 +31,7 @@ func (s *Service) Dashboard(ctx context.Context) (DashboardQueues, error) {
 	}
 
 	workbench, err := s.queryRepairs(ctx,
-		`SELECT `+repairCols+` FROM repairs t JOIN customers c ON c.id = t.customer_id
+		`SELECT `+repairCols+` FROM repairs t LEFT JOIN customers c ON c.id = t.customer_id
 		 WHERE t.archived_at = '' AND t.stage NOT IN ('repaired','no_repair')
 		 ORDER BY CASE t.stage
 		   WHEN 'in_progress' THEN 0 WHEN 'lab_test' THEN 1 WHEN 'customer_test' THEN 2
@@ -41,7 +41,7 @@ func (s *Service) Dashboard(ctx context.Context) (DashboardQueues, error) {
 		return out, err
 	}
 	ready, err := s.queryRepairs(ctx,
-		`SELECT `+repairCols+` FROM repairs t JOIN customers c ON c.id = t.customer_id
+		`SELECT `+repairCols+` FROM repairs t LEFT JOIN customers c ON c.id = t.customer_id
 		 WHERE t.archived_at = '' AND t.stage IN ('repaired','no_repair') AND t.pickup_at = ''
 		 ORDER BY t.updated_at ASC, t.id ASC`)
 	if err != nil {

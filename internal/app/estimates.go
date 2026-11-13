@@ -167,16 +167,17 @@ func (s *Service) AcceptEstimate(ctx context.Context, actor string, estimateID i
 	if err != nil {
 		return Estimate{}, err
 	}
-	current, err := s.GetEstimate(ctx, estimateID)
-	if err != nil {
-		return Estimate{}, err
-	}
-	if current.Status == "accepted" {
-		return Estimate{}, errs.New(errs.CodeConflict, "estimate %d (v%d) is already accepted", estimateID, current.Version)
-	}
-
 	ts := s.timestamp()
 	err = s.InTx(ctx, func(ctx context.Context) error {
+		// Read the snapshot inside the transaction: an accept decided on a stale
+		// status would double-audit and supersede a concurrently accepted version.
+		current, err := s.GetEstimate(ctx, estimateID)
+		if err != nil {
+			return err
+		}
+		if current.Status == "accepted" {
+			return errs.New(errs.CodeConflict, "estimate %d (v%d) is already accepted", estimateID, current.Version)
+		}
 		if _, err := s.q(ctx).ExecContext(ctx,
 			`UPDATE estimates SET status = 'superseded' WHERE repair_id = ? AND status = 'accepted'`, current.RepairID); err != nil {
 			return errs.Wrap(errs.CodeInternal, err, "cannot supersede earlier accepted estimate")
@@ -185,7 +186,7 @@ func (s *Service) AcceptEstimate(ctx context.Context, actor string, estimateID i
 			`UPDATE estimates SET status = 'accepted' WHERE id = ?`, estimateID); err != nil {
 			return errs.Wrap(errs.CodeInternal, err, "cannot accept estimate")
 		}
-		_, err := s.q(ctx).ExecContext(ctx,
+		_, err = s.q(ctx).ExecContext(ctx,
 			`INSERT INTO repair_activity(repair_id, actor, action, detail, created_at) VALUES(?,?,?,?,?)`,
 			current.RepairID, actor, "estimate_accept", detailJSON(map[string]any{
 				"estimate_id": estimateID, "version": current.Version, "total_cents": current.TotalCents,

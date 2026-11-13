@@ -33,7 +33,7 @@ func (s *Server) repairList(w http.ResponseWriter, r *http.Request, sess app.Ses
 		s.renderTemplate(w, r, "repairs-results", sess, data)
 		return
 	}
-	s.render(w, r, "tickets", "Repairs", sess, data)
+	s.render(w, r, "tickets", "repairs.title", sess, data)
 }
 
 // repairCreateForm is the submitted new-repair draft.
@@ -58,7 +58,7 @@ func (s *Server) repairNew(w http.ResponseWriter, r *http.Request, sess app.Sess
 			break
 		}
 	}
-	s.render(w, r, "ticket_new", "New repair", sess, map[string]any{
+	s.render(w, r, "ticket_new", "repair_new.title", sess, map[string]any{
 		"Customers": customers, "Form": repairCreateForm{CustomerID: selected, CustomerName: selectedName},
 	})
 }
@@ -117,7 +117,7 @@ func (s *Server) repairCreate(w http.ResponseWriter, r *http.Request, sess app.S
 				s.renderError(w, r, sessView(sess), cerr, statusOf(cerr))
 				return
 			}
-			s.renderStatus(w, r, "ticket_new", "New repair", sess, createErr.Error(), map[string]any{
+			s.renderStatus(w, r, "ticket_new", "repair_new.title", sess, s.flashText(r, createErr), map[string]any{
 				"Customers": customers, "Form": form,
 			}, statusOf(createErr))
 			return
@@ -258,7 +258,7 @@ func (s *Server) repairFormError(w http.ResponseWriter, r *http.Request, sess ap
 		return
 	}
 	apply(&view)
-	s.renderStatus(w, r, "ticket", "Repair "+itoa(id), sess, conflictMessage(err), view, statusOf(err))
+	s.renderStatus(w, r, "ticket", s.pageTitle(r, "repair.title", id), sess, s.flashText(r, err), view, statusOf(err))
 }
 
 func (s *Server) repairShow(w http.ResponseWriter, r *http.Request, sess app.Session) {
@@ -272,7 +272,7 @@ func (s *Server) repairShow(w http.ResponseWriter, r *http.Request, sess app.Ses
 		s.renderError(w, r, sessView(sess), err, statusOf(err))
 		return
 	}
-	s.render(w, r, "ticket", "Repair "+itoa(id), sess, view)
+	s.render(w, r, "ticket", s.pageTitle(r, "repair.title", id), sess, view)
 }
 
 func (s *Server) repairUpdate(w http.ResponseWriter, r *http.Request, sess app.Session) {
@@ -301,7 +301,7 @@ func (s *Server) repairUpdate(w http.ResponseWriter, r *http.Request, sess app.S
 				return
 			}
 			view.Form = form
-			s.renderStatus(w, r, "ticket", "Repair "+itoa(id), sess, err.Error(), view, statusOf(err))
+			s.renderStatus(w, r, "ticket", s.pageTitle(r, "repair.title", id), sess, s.flashText(r, err), view, statusOf(err))
 			return
 		}
 		patch.CustomerID = &form.CustomerID
@@ -319,7 +319,7 @@ func (s *Server) repairUpdate(w http.ResponseWriter, r *http.Request, sess app.S
 				view.Form.Revision = view.Revision
 				view.Form.Conflict = true
 			}
-			s.renderStatus(w, r, "ticket", "Repair "+itoa(id), sess, conflictMessage(err), view, statusOf(err))
+			s.renderStatus(w, r, "ticket", s.pageTitle(r, "repair.title", id), sess, s.flashText(r, err), view, statusOf(err))
 			return
 		}
 		s.renderError(w, r, sessView(sess), err, statusOf(err))
@@ -380,7 +380,7 @@ func (s *Server) repairEntryAdd(w http.ResponseWriter, r *http.Request, sess app
 				form.Kind = view.EntryForm.Kind
 			}
 			view.EntryForm = form
-			s.renderStatus(w, r, "ticket", "Repair "+itoa(id), sess, conflictMessage(err), view, statusOf(err))
+			s.renderStatus(w, r, "ticket", s.pageTitle(r, "repair.title", id), sess, s.flashText(r, err), view, statusOf(err))
 			return
 		}
 		s.renderError(w, r, sessView(sess), err, statusOf(err))

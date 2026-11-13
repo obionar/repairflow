@@ -64,8 +64,8 @@ contributions are welcome, but do not describe them as supported.
   files only in `internal/files`, presentation in `internal/cli` and `internal/web`.
 - Add a regression test before fixing behavior. Prove failure paths with disposable workspaces and
   fault injection, not by weakening a check.
-- Keep the public tree free of internal plans, verification logs, screenshots, UI-parity matrices and
-  generated symbol maps. `make symbols` writes `dist/SYMBOLS.md`; do not hand-edit it.
+- Keep the public tree free of internal plans, verification logs, unreviewed screenshots, UI-parity
+  matrices and generated symbol maps. `make symbols` writes `dist/SYMBOLS.md`; do not hand-edit it.
 - Update `README.md` and the relevant `docs/` page in the same change as user-visible behavior.
 - Do not add placeholder features for deferred work. If a capability is not implemented, say so.
 
@@ -89,8 +89,8 @@ Do not invent deployment steps. Follow:
 
 The binary must live at a stable path before `service install`; the unit pins its absolute path.
 A real deployment needs a verified backup and explicit owner authorization. Unsigned builds cannot
-use `update apply`; that refusal is deliberate. Release bundles must include `LICENSE` and
-`THIRD_PARTY_NOTICES.md`; run `make license-check` before packaging.
+use `update apply`; that refusal is deliberate. Release bundles must include `LICENSE`; run
+`make license-check` before packaging.
 
 ## Skills
 

@@ -122,8 +122,9 @@ func CurrentVersion(ctx context.Context, handle *sql.DB) (int, error) {
 
 // Migrate applies pending migrations in order, each recorded in
 // schema_migrations. A database from a newer version is refused
-// ("refuse, never guess"); migrations never run implicitly at startup —
-// callers invoke Migrate explicitly (init/seed/doctor).
+// ("refuse, never guess"). Callers invoke it explicitly: init/seed/doctor and
+// every domain open (internal/cli/domain.go), so a serve upgrades a workspace
+// forward-only the first time the new binary opens it.
 func Migrate(ctx context.Context, handle *sql.DB) error {
 	if err := refusePreRenameWorkspace(ctx, handle); err != nil {
 		return err

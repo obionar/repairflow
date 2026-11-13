@@ -9,6 +9,7 @@ import (
 	"repairflow/internal/errs"
 	"repairflow/internal/files"
 	"repairflow/internal/seed"
+	"repairflow/internal/testutil"
 )
 
 func newService(t *testing.T) *app.Service {
@@ -18,7 +19,7 @@ func newService(t *testing.T) *app.Service {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { handle.Close() })
+	t.Cleanup(func() { testutil.Close(t, handle) })
 	if err := db.Migrate(context.Background(), handle); err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +93,7 @@ func TestDemoSeedAndIdempotence(t *testing.T) {
 		if err != nil {
 			t.Fatalf("demo media bytes: %v", err)
 		}
-		rc.Close()
+		testutil.Close(t, rc)
 	}
 	if intake != 1 || onEntry != 1 {
 		t.Fatalf("need one intake + one log-entry photo, got %d/%d", intake, onEntry)
@@ -179,7 +180,7 @@ func TestDemoResetRestoresPristineState(t *testing.T) {
 		if err != nil {
 			t.Fatalf("bytes after reset: %v", err)
 		}
-		rc.Close()
+		testutil.Close(t, rc)
 	}
 }
 
