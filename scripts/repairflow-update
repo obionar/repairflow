@@ -1,0 +1,31 @@
+#!/bin/sh
+# Fetch one exact signed RepairFlow release; the installed binary verifies and swaps it.
+#
+#   repairflow-update v0.2.0            check only, download and verify, change nothing
+#   repairflow-update v0.2.0 --apply    verified, atomic replacement (keeps <exe>.prev)
+#   repairflow-update v0.2.0 --apply --restart
+#
+# No network code lives in the binary: this script fetches, the installed binary verifies the
+# signature and hash and performs the locked, hashed swap. Set REPAIRFLOW_UPDATE_BASE_URL to
+# point the download at a mirror or a local fixture.
+set -eu
+usage='usage: repairflow-update vX.Y.Z [--apply [--restart]]'
+apply=0; restart=0; tag=
+for a in "$@"; do case $a in
+  --apply) apply=1;; --restart) restart=1;; -h|--help) echo "$usage"; exit 0;;
+  v*) tag=$a;; *) echo "unknown argument: $a" >&2; exit 2;;
+esac; done
+[ -n "$tag" ] || { echo "$usage" >&2; exit 2; }
+case "$(uname -m)" in x86_64|amd64) a=x86_64;; aarch64|arm64) a=arm64;; *) echo "unsupported arch" >&2; exit 1;; esac
+w=$(mktemp -d); trap 'rm -rf "$w"' EXIT
+u=${REPAIRFLOW_UPDATE_BASE_URL:-https://github.com}/obionar/repairflow/releases/download/$tag/repairflow_Linux_$a.tar.gz
+if command -v curl >/dev/null 2>&1; then curl -fsSL -o "$w/a.tgz" "$u"; else wget -q -O "$w/a.tgz" "$u"; fi
+tar xzf "$w/a.tgz" -C "$w" repairflow manifest.json manifest.sig
+set -- --manifest "$w/manifest.json" --signature "$w/manifest.sig"
+if [ "$apply" = 1 ]; then
+  "$(command -v repairflow)" update apply --file "$w/repairflow" "$@" --confirm
+  [ "$restart" = 1 ] && { systemctl --user restart repairflow.service 2>/dev/null || rc-service repairflow restart; }
+else
+  "$(command -v repairflow)" update check "$@"
+fi
+"$(command -v repairflow)" version | head -1

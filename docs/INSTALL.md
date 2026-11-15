@@ -47,6 +47,8 @@ sha256sum -c SHA256SUMS
 tar -xzf repairflow_Linux_x86_64.tar.gz
 install -Dm0755 repairflow ~/.local/bin/repairflow
 install -Dm0755 update-github.sh ~/.local/bin/update-github.sh
+install -Dm0755 repairflow-update ~/.local/bin/repairflow-update
+install -Dm0755 repairflow-autoupdate ~/.local/bin/repairflow-autoupdate
 repairflow version
 ```
 

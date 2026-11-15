@@ -224,7 +224,52 @@ these at the host level and check them during [bench testing](BENCH-TEST.md), es
 
 Always create and verify a backup first.
 
-### Signed GitHub update
+### One command, signed
+
+The release archive ships two small POSIX scripts next to the binary. `repairflow-update` downloads
+one exact tag and hands it to the installed binary, which verifies the signature, hash and platform
+and performs the locked swap — no network code lives in the application:
+
+```bash
+repairflow-update v0.2.0            # check only: download and verify, change nothing
+repairflow-update v0.2.0 --apply    # replace the binary, keep <exe>.prev
+repairflow-update v0.2.0 --apply --restart
+```
+
+With the default `~/.local/bin` installation none of these need privilege.
+
+### Unattended updates
+
+`repairflow-autoupdate` is the same path behind a scheduler. Run it from cron or a systemd timer:
+
+```cron
+10 4 * * * $HOME/.local/bin/repairflow-autoupdate >/dev/null 2>&1
+```
+
+It follows GitHub's `latest`, which excludes prereleases, so it never moves itself onto a release
+candidate line; set `RF_UPDATE_TAG` to pin one explicitly. Before it does anything it refuses an
+unhealthy or busy workspace and a disk without room for the restore point. It then takes a verified
+backup **outside** the workspace, applies the update, and checks the health of the result — schema
+open, `doctor`, record counts and the login page. On any failure it restores that backup (the schema
+is forward-only, so the previous binary alone cannot undo a migration), puts `<exe>.prev` back, and
+records the tag so it is not retried. One instance runs at a time (`flock`), every path exits 0, and
+the outcome is appended to `<workspace>/logs/update.log`.
+
+The equivalent systemd user timer, if the host has one:
+
+```ini
+# ~/.config/systemd/user/repairflow-autoupdate.{service,timer}
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/repairflow-autoupdate
+Nice=10
+[Timer]
+OnCalendar=*-*-* 04:10
+RandomizedDelaySec=15m
+Persistent=true
+```
+
+### Signed GitHub update (update-github.sh)
 
 After a verified backup, `update-github.sh` downloads the installable archive for the exact release
 tag from the public `obionar/repairflow` repository. The tag is exact because GitHub `latest` excludes

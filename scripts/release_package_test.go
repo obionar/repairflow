@@ -37,6 +37,8 @@ func TestPackageReleaseWritesOnlyInstallableArchives(t *testing.T) {
 		"--manifest", write("manifest.json", `{"format_version":1}`+"\n"),
 		"--signature", write("manifest.sig", "signature fixture\n"),
 		"--update-script", write("update-github.sh", "#!/bin/sh\n"),
+		"--update-script", write("repairflow-update", "#!/bin/sh\n"),
+		"--update-script", write("repairflow-autoupdate", "#!/bin/sh\n"),
 	)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("package release: %v\n%s", err, output)
@@ -66,6 +68,8 @@ func TestPackageReleaseWritesOnlyInstallableArchives(t *testing.T) {
 		"manifest.json",
 		"manifest.sig",
 		"update-github.sh",
+		"repairflow-update",
+		"repairflow-autoupdate",
 	}
 	for _, archive := range wantNames[1:] {
 		path := filepath.Join(out, archive)

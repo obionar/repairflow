@@ -9,7 +9,8 @@
 #   SHA256SUMS
 #
 # Each archive contains only the binary, LICENSE, the
-# signed manifest, manifest signature and update-github.sh. No loose binaries,
+# signed manifest, manifest signature and the operator update scripts
+# (update-github.sh, repairflow-update, repairflow-autoupdate). No loose binaries,
 # docs, demo launcher or source archive are published as release assets.
 # Refuses a dirty worktree, a -dev version and an existing output directory.
 # Never prints key material.
@@ -156,7 +157,9 @@ scripts/package-release.sh \
   --license LICENSE \
   --manifest "$BUILD/manifest.json" \
   --signature "$BUILD/manifest.sig" \
-  --update-script scripts/update-github.sh
+  --update-script scripts/update-github.sh \
+  --update-script scripts/repairflow-update \
+  --update-script scripts/repairflow-autoupdate
 
 count=$(wc -l < "$OUT/SHA256SUMS")
 echo "release: PASS — $VERSION in $OUT ($count installable archives)"
