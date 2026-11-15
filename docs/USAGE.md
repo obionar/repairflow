@@ -66,6 +66,16 @@ size, printer name) so each setting has one authority. p15 takes exclusive contr
 adapter while it prints; use a dedicated adapter on a shared host. When the printer is unavailable,
 repairs keep working and the print action reports the driver's reason.
 
+What a failed print does, and does not, do:
+
+- Nothing is recorded for a failed print, and it is never retried automatically — the label may
+  already have reached the paper. Check the printer before pressing the button again.
+- Without a running p15 daemon the first attempt pays the driver's discovery timeout (tens of
+  seconds) before it reports; a warm daemon answers in seconds.
+- A failed raw-HCI attempt can leave the Bluetooth adapter powered down. Check
+  `bluetoothctl show` and power it back on (`bluetoothctl power on`) before using other devices on
+  that adapter.
+
 ## Attachments
 
 Add photos, test evidence or documents from the repair page, or with the CLI:

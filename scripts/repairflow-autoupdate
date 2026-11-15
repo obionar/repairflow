@@ -1,0 +1,79 @@
+#!/bin/sh
+# repairflow-autoupdate — unattended, reversible, idempotent.
+#
+# Run it from cron or a systemd timer. It exits 0 when there is nothing to do, when the
+# candidate is refused, and when it rolled back; a non-zero exit means the job itself is broken.
+# The channel is GitHub's "latest", which excludes prereleases by definition, so an unattended
+# run never jumps to a release candidate. Set RF_UPDATE_TAG to pin one explicitly.
+set -eu
+home=${REPAIRFLOW_HOME:-$HOME/.repairflow}
+bin=$(command -v repairflow)
+fetch=$(command -v repairflow-update)
+state=$home/cache/update
+log=$home/logs/update.log
+mkdir -p "$state" "$home/logs"
+say() { printf '%s %s\n' "$(date -Is)" "$*" >>"$log"; }
+
+# One run at a time; a second invocation is a no-op, never a concurrent writer.
+exec 9>"$state/lock"; flock -n 9 || exit 0
+
+# Never update a workspace that is not healthy, and never while another writer holds it.
+"$bin" --home "$home" doctor >/dev/null || { say "skip: workspace unhealthy"; exit 0; }
+"$bin" --home "$home" status >/dev/null 2>&1 || { say "skip: workspace busy"; exit 0; }
+
+# The channel is GitHub's "latest": one HEAD request, no API, no token, no jq.
+cand=${RF_UPDATE_TAG:-$(curl -fsSI https://github.com/obionar/repairflow/releases/latest 2>/dev/null |
+       tr -d '\r' | sed -n 's|^[Ll]ocation: .*/tag/\(v[^ /]*\)$|\1|p')}
+[ -n "$cand" ] || { say "skip: cannot resolve latest release"; exit 0; }
+check=$("$fetch" "$cand" 2>&1) || { say "skip: $cand not installable here"; exit 0; }
+printf '%s\n' "$check" >>"$log"
+case $check in *"up to date"*) say "noop: up to date"; exit 0;; esac
+[ -f "$state/failed-$cand" ] && { say "skip: $cand already failed"; exit 0; }
+
+# Disk: room for the restore point, the archive and the restored copy.
+need=$(( $(du -sk "$home" | cut -f1) * 3 + 200000 ))
+avail=$(df -Pk "$(dirname "$home")" | awk 'NR==2{print $4}')
+[ "$avail" -gt "$need" ] || { say "skip: only ${avail}K free, need ${need}K"; exit 0; }
+
+# The restore point, verified, outside the workspace. Nothing proceeds without it: the
+# schema is forward-only, so the previous binary alone cannot undo a migration.
+stamp=$(date +%Y%m%dT%H%M%S)
+bkp=$HOME/backups/pre-$cand-$stamp.rfbak
+mkdir -p "$HOME/backups"
+if ! "$bin" --home "$home" backup create --output "$bkp" >>"$log" 2>&1 ||
+   ! "$bin" backup verify "$bkp" >>"$log" 2>&1; then
+  say "abort: pre-update backup failed"; rm -f "$bkp"; exit 0
+fi
+before=$("$bin" --home "$home" --json customer list --per-page 1 | sed -n 's/.*"total":\([0-9]*\).*/\1/p')
+
+# Apply. The binary verifies signature, hash and platform, refuses a same-version or older
+# candidate, and keeps <exe>.prev.
+if ! "$fetch" "$cand" --apply >>"$log" 2>&1; then
+  : >"$state/failed-$cand"
+  say "abort: $cand not applied (refused or failed); nothing replaced"
+  rm -f "$bkp"
+  exit 0
+fi
+
+# The health check is the verdict, not the exit code: open the schema, then re-read.
+"$bin" --home "$home" customer list --per-page 1 >/dev/null 2>&1 || true
+after=$("$bin" --home "$home" --json customer list --per-page 1 | sed -n 's/.*"total":\([0-9]*\).*/\1/p')
+healthy=$("$bin" --home "$home" doctor >/dev/null 2>&1 && echo yes || echo no)
+web=$(curl -fsS -o /dev/null -m 5 http://127.0.0.1:8091/login && echo yes || echo no)
+
+if [ "$healthy" = yes ] && [ "$before" = "$after" ]; then
+  say "ok: $cand installed ($before customers), web=$web"
+  systemctl --user restart repairflow.service 2>/dev/null || true
+  ls -1t "$HOME"/backups/pre-*.rfbak 2>/dev/null | tail -n +4 | xargs -r rm -f
+  exit 0
+fi
+
+# Rollback: restore the pre-update workspace and put the previous binary back.
+say "rollback: health=$healthy counts ${before:-?}->${after:-?}"
+systemctl --user stop repairflow.service 2>/dev/null || true
+mv "$home" "$home.broken-$stamp"
+"$bin" restore "$bkp" --home "$home" >>"$log" 2>&1 || say "MANUAL: restore failed, backup at $bkp"
+[ -f "$bin.prev" ] && mv -f "$bin.prev" "$bin"
+systemctl --user start repairflow.service 2>/dev/null || true
+: >"$state/failed-$cand"
+say "rolled back to the previous version; $cand will not be retried"

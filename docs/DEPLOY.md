@@ -89,6 +89,34 @@ Two application limits apply behind the proxy — one shared login-throttle buck
 that cannot be marked `Secure`; see [Security](SECURITY.md#remote-access). Tailscale provides the outer
 network access control; RepairFlow authentication remains mandatory.
 
+### Trusted LAN, authentication on
+
+A single-owner instance on a trusted network can serve that network directly instead of using a
+tunnel. Bind the listener to the machine's own address, allow the Host header and keep
+authentication on:
+
+```toml
+# <workspace>/config.toml
+[web]
+host = "192.0.2.10"      # the machine's address on that network
+allow_remote = true
+auth_required = true
+```
+
+```bash
+repairflow config check
+# restart the service so the listener moves
+```
+
+Then open `http://192.0.2.10:8091/login` from any device on that network. The limits are not
+mitigated by this mode: the traffic is plain HTTP, so the password and the session cookie cross the
+network in clear text and the cookie cannot be marked `Secure`; the listener depends on that address
+staying assigned, so a DHCP change needs a configuration edit and a restart; the login throttle
+counts each LAN peer; and only a normal browser window is supported — a page that embeds RepairFlow
+in a frame from another origin is refused by the origin check. Use it with synthetic or
+low-sensitivity records until TLS (see above) is in place, and never forward port 8091 from the
+internet.
+
 ### Unsafe LAN demo mode
 
 `web.allow_insecure_lan=true` permits `auth_required=false` on a non-loopback listener for temporary
@@ -196,7 +224,52 @@ these at the host level and check them during [bench testing](BENCH-TEST.md), es
 
 Always create and verify a backup first.
 
-### Signed GitHub update
+### One command, signed
+
+The release archive ships two small POSIX scripts next to the binary. `repairflow-update` downloads
+one exact tag and hands it to the installed binary, which verifies the signature, hash and platform
+and performs the locked swap — no network code lives in the application:
+
+```bash
+repairflow-update v0.2.0            # check only: download and verify, change nothing
+repairflow-update v0.2.0 --apply    # replace the binary, keep <exe>.prev
+repairflow-update v0.2.0 --apply --restart
+```
+
+With the default `~/.local/bin` installation none of these need privilege.
+
+### Unattended updates
+
+`repairflow-autoupdate` is the same path behind a scheduler. Run it from cron or a systemd timer:
+
+```cron
+10 4 * * * $HOME/.local/bin/repairflow-autoupdate >/dev/null 2>&1
+```
+
+It follows GitHub's `latest`, which excludes prereleases, so it never moves itself onto a release
+candidate line; set `RF_UPDATE_TAG` to pin one explicitly. Before it does anything it refuses an
+unhealthy or busy workspace and a disk without room for the restore point. It then takes a verified
+backup **outside** the workspace, applies the update, and checks the health of the result — schema
+open, `doctor`, record counts and the login page. On any failure it restores that backup (the schema
+is forward-only, so the previous binary alone cannot undo a migration), puts `<exe>.prev` back, and
+records the tag so it is not retried. One instance runs at a time (`flock`), every path exits 0, and
+the outcome is appended to `<workspace>/logs/update.log`.
+
+The equivalent systemd user timer, if the host has one:
+
+```ini
+# ~/.config/systemd/user/repairflow-autoupdate.{service,timer}
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/repairflow-autoupdate
+Nice=10
+[Timer]
+OnCalendar=*-*-* 04:10
+RandomizedDelaySec=15m
+Persistent=true
+```
+
+### Signed GitHub update (update-github.sh)
 
 After a verified backup, `update-github.sh` downloads the installable archive for the exact release
 tag from the public `obionar/repairflow` repository. The tag is exact because GitHub `latest` excludes
@@ -205,18 +278,19 @@ architecture, extracts the signed manifest and binary, verifies the signature pl
 SHA-256/size, and does not change the installation by default:
 
 ```bash
-./update-github.sh --tag X.Y.Z --binary /usr/local/bin/repairflow
+./update-github.sh --tag X.Y.Z --binary ~/.local/bin/repairflow
 ```
 
 Apply only the reviewed candidate:
 
 ```bash
-./update-github.sh --tag X.Y.Z --binary /usr/local/bin/repairflow --apply
+./update-github.sh --tag X.Y.Z --binary ~/.local/bin/repairflow --apply
 ```
 
-The script performs download and signature verification as the operator, then
-uses `doas` or `sudo` for the local replacement when `/usr/local/bin` is
-root-owned. It never downloads or verifies as root. Automatic escalation refuses symlink
+The script performs download and signature verification as the operator. With the default
+`~/.local/bin` installation the replacement is written by that same account and no privilege is
+involved at any point. For a root-owned `/usr/local/bin/repairflow` it uses `doas` or `sudo` for the
+local replacement only, and never downloads or verifies as root. Automatic escalation refuses symlink
 executables, non-root ownership, or group/world write permission on the executable or any parent
 directory. Pass only the trusted installed binary as `--binary`; privilege executes that path as root.
 
@@ -232,12 +306,13 @@ A signed release archive contains `manifest.json`, `manifest.sig` and the `repai
 ```bash
 tar -xzf repairflow_Linux_x86_64.tar.gz
 repairflow update check --manifest manifest.json --signature manifest.sig
-sudo /usr/local/bin/repairflow update apply --file repairflow \
+repairflow update apply --file repairflow \
   --manifest manifest.json --signature manifest.sig --confirm
 ```
 
-The check can run as the operator. Replacing a root-owned `/usr/local/bin/repairflow`
-requires `sudo` or `doas`; the updater creates a lock next to the executable and
+The check can run as the operator. The default `~/.local/bin/repairflow` is writable by the same
+account, so the apply needs no privilege; replacing a root-owned `/usr/local/bin/repairflow` takes
+`sudo` or `doas`. The updater creates a lock next to the executable and
 refuses clearly when it lacks permission. The source installer shares that lock and requires `flock`.
 The updater re-reads the installed version while locked to reject a stale downgrade or re-apply. Do not remove `<exe>.lock` while an update
 is running.
@@ -264,7 +339,7 @@ Stop the service and replace the executable. If the executable path changed, rer
 ```bash
 # systemd
 systemctl --user stop repairflow.service
-sudo install -Dm0755 repairflow /usr/local/bin/repairflow
+install -Dm0755 repairflow ~/.local/bin/repairflow
 # If the path changed: repairflow service install --no-enable
 systemctl --user start repairflow.service
 
@@ -285,9 +360,11 @@ is still an open audit finding.
 repairflow service remove
 repairflow backup create --output /absolute/path/final-backup.rfbak
 repairflow backup verify /absolute/path/final-backup.rfbak
-sudo rm /usr/local/bin/repairflow /usr/local/bin/update-github.sh
-sudo rm -f /usr/local/bin/repairflow.lock
+rm ~/.local/bin/repairflow ~/.local/bin/update-github.sh
+rm -f ~/.local/bin/repairflow.lock
 ```
+
+For a `/usr/local/bin` installation, delete the same files there with `sudo` or `doas` instead.
 
 This removes the service and executable but leaves the workspace intact. The lock file is only
 created by an update and is safe to remove after the service is stopped; never remove it while an

@@ -113,9 +113,9 @@ Never use these public demo credentials for a real workspace.
 
 ### Start a real workspace
 
-The default install is `/usr/local/bin/repairflow`, owned by root so a regular user can execute it
-but not replace it; the installer uses `doas` or `sudo` only for that step. The workspace remains
-`~/.repairflow` unless you pass `--home` or set `REPAIRFLOW_HOME`.
+The default install is `~/.local/bin/repairflow`, owned by you, so installing and updating need no
+`sudo`; `REPAIRFLOW_PREFIX=/usr/local` gives the shared, root-owned layout instead. The workspace
+remains `~/.repairflow` unless you pass `--home` or set `REPAIRFLOW_HOME`.
 
 After [installing the executable](docs/INSTALL.md) as `repairflow`:
 

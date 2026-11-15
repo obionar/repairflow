@@ -105,9 +105,9 @@ version numbers.
 
 A workspace contains `config.toml`, `data/repairflow.db`, `files/`, `backups/`, `logs/`, `cache/`
 and `run/`. Configuration is strict and is not silently rewritten. User-supplied filenames are
-metadata, never storage paths. The workspace-owning OS account is the outer trust boundary. The
-default executable is `/usr/local/bin/repairflow`, root-owned so a regular user can execute but not
-replace it; the workspace itself remains owned by the operator.
+metadata, never storage paths. The workspace-owning OS account is the outer trust boundary. The default executable is `~/.local/bin/repairflow`, owned by the operator; `REPAIRFLOW_PREFIX=/usr/local`
+installs a root-owned binary that a regular user can execute but not replace. The workspace itself
+remains owned by the operator.
 
 The filesystem and SQLite cannot commit atomically together. Upload staging and `doctor`
 reconciliation expose missing or orphaned bytes. Backups combine a consistent `VACUUM INTO` database
@@ -124,7 +124,8 @@ Updates authenticate and verify the artifact before installation. The updater re
 files, stages and re-hashes `<executable>.new`, preserves `<executable>.prev`, verifies the published
 target and health-checks the verified bytes. Replacement or health-check failure rolls back. Updates
 share an executable lock with the source installer and re-read the installed version while locked;
-replacing a root-owned `/usr/local/bin/repairflow` requires `sudo`/`doas`. Verified apply is Linux-only; unsigned builds and downgrades are refused. The
+replacing a root-owned `/usr/local/bin/repairflow` requires `sudo`/`doas`, while the default
+`~/.local/bin` installation is replaced by its own account. Verified apply is Linux-only; unsigned builds and downgrades are refused. The
 optional `scripts/update-github.sh` downloads and safely extracts the exact architecture archive for
 a GitHub release tag, then hands the verified local binary and signed manifest to this same path; the
 application performs no background update checks.

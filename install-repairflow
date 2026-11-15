@@ -13,7 +13,7 @@ LC_ALL=C
 export LC_ALL
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-prefix=${REPAIRFLOW_PREFIX:-/usr/local}
+prefix=${REPAIRFLOW_PREFIX:-$HOME/.local}
 bin=$prefix/bin/repairflow
 workdir=${REPAIRFLOW_HOME:-$HOME/.repairflow}
 
@@ -24,10 +24,12 @@ if [ $# -gt 0 ]; then
 Usage: install-repairflow
 
 Builds the repairflow binary from this checkout and installs it to
-$REPAIRFLOW_PREFIX/bin/repairflow (default: /usr/local/bin/repairflow).
-The default location is root-owned: a regular user can execute it but not
-replace it. The script uses doas or sudo for only the install step when needed;
-set REPAIRFLOW_PREFIX to another directory to install without privilege.
+$REPAIRFLOW_PREFIX/bin/repairflow (default: $HOME/.local/bin/repairflow).
+The default location belongs to the operator, so installing and updating need
+no privilege; the binary is replaced atomically under the same lock as signed
+updates. Set REPAIRFLOW_PREFIX=/usr/local for the shared, root-owned layout:
+a regular user can then execute the binary but not replace it, and the script
+uses doas or sudo for only the install step.
 
 Re-run after `git pull` to update. Workspaces are untouched; their database
 schema migrates automatically on the next command or start. Restart a running
@@ -43,9 +45,9 @@ EOF
   esac
 fi
 
-# /usr/local is root-owned so a regular user can execute the installed binary
-# but cannot replace it. Escalate only the short install step; the build and
-# workspace validation still run as the operator.
+# A root-owned prefix (for example /usr/local) so a regular user can execute the
+# installed binary but cannot replace it. Escalate only the short install step; the
+# build and workspace validation still run as the operator.
 priv=""
 if [ "$(id -u)" -ne 0 ]; then
   probe=$prefix

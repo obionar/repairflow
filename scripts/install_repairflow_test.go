@@ -123,14 +123,14 @@ func TestInstallSharesUpdateLock(t *testing.T) {
 	}
 }
 
-func TestInstallHelpDocumentsSystemPrefix(t *testing.T) {
+func TestInstallHelpDocumentsDefaultPrefix(t *testing.T) {
 	script, _, _, _, _ := setupInstall(t)
 	cmd := exec.Command("sh", script, "--help")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("help: %v (%s)", err, out)
 	}
-	for _, want := range []string{"/usr/local/bin/repairflow", "root-owned", "REPAIRFLOW_PREFIX"} {
+	for _, want := range []string{"$HOME/.local/bin/repairflow", "root-owned", "REPAIRFLOW_PREFIX"} {
 		if !strings.Contains(string(out), want) {
 			t.Errorf("help missing %q:\n%s", want, out)
 		}
