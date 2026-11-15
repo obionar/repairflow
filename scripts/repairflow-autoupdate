@@ -13,6 +13,13 @@ state=$home/cache/update
 log=$home/logs/update.log
 mkdir -p "$state" "$home/logs"
 say() { printf '%s %s\n' "$(date -Is)" "$*" >>"$log"; }
+restart_service() {
+  systemctl --user restart repairflow.service 2>/dev/null && return 0
+  for p in doas sudo; do
+    command -v "$p" >/dev/null 2>&1 && "$p" rc-service repairflow restart 2>/dev/null && return 0
+  done
+  return 1
+}
 
 # One run at a time; a second invocation is a no-op, never a concurrent writer.
 exec 9>"$state/lock"; flock -n 9 || exit 0
@@ -63,7 +70,7 @@ web=$(curl -fsS -o /dev/null -m 5 http://127.0.0.1:8091/login && echo yes || ech
 
 if [ "$healthy" = yes ] && [ "$before" = "$after" ]; then
   say "ok: $cand installed ($before customers), web=$web"
-  systemctl --user restart repairflow.service 2>/dev/null || true
+  restart_service || say "RESTART NEEDED: the service still runs the previous binary"
   ls -1t "$HOME"/backups/pre-*.rfbak 2>/dev/null | tail -n +4 | xargs -r rm -f
   exit 0
 fi
@@ -74,6 +81,6 @@ systemctl --user stop repairflow.service 2>/dev/null || true
 mv "$home" "$home.broken-$stamp"
 "$bin" restore "$bkp" --home "$home" >>"$log" 2>&1 || say "MANUAL: restore failed, backup at $bkp"
 [ -f "$bin.prev" ] && mv -f "$bin.prev" "$bin"
-systemctl --user start repairflow.service 2>/dev/null || true
+restart_service || say "RESTART NEEDED after rollback"
 : >"$state/failed-$cand"
 say "rolled back to the previous version; $cand will not be retried"

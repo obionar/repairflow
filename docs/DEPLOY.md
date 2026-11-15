@@ -236,7 +236,9 @@ repairflow-update v0.2.0 --apply    # replace the binary, keep <exe>.prev
 repairflow-update v0.2.0 --apply --restart
 ```
 
-With the default `~/.local/bin` installation none of these need privilege.
+With the default `~/.local/bin` installation none of these need privilege. `--restart` uses
+`systemctl --user` and falls back to `doas`/`sudo rc-service`; when neither is possible it prints the
+command to run, and the verified update still counts as applied.
 
 ### Unattended updates
 
