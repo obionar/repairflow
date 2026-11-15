@@ -33,6 +33,9 @@ contributions are welcome, but do not describe them as supported.
 - Back up before a destructive or upgrade operation. A restore targets an empty/new workspace only.
 - Do not publish a release, push a tag, deploy to a host or change a real service without explicit
   owner authorization. There is no CI or GitHub Actions gate; local verification is authoritative.
+- `master` is the single public history: it starts at the public baseline commit and only grows by
+  new commits on top. Never force-push it and never rebuild it from a squashed export. Private
+  notes, local test workspaces and abandoned experiments stay outside this repository.
 
 ## Repository map
 
