@@ -53,6 +53,10 @@ RepairFlow is in pre-release development and workshop evaluation. It is built an
 **amd64** and **arm64**. Other operating systems and architectures may work or be straightforward to
 port, but they are **not tested yet** and are not supported targets.
 
+Pre-releases promise **no compatibility between versions**: schema, CLI flags and JSON, and web
+routes may change, and a workspace may need to be recreated rather than migrated. Take a verified
+backup before opening it with a newer binary, and use prereleases on disposable workspaces.
+
 ## License
 
 Copyright (C) 2026 RepairFlow contributors.
