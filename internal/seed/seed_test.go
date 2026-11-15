@@ -53,7 +53,7 @@ func TestDemoSeedAndIdempotence(t *testing.T) {
 	}
 
 	// Seeded data flows through the same rules: staged repairs, entries, activity.
-	page, err := svc.ListRepairs(ctx, app.RepairFilter{Stage: "repaired", Search: "ThinkPad T480 (DEMO)"})
+	page, err := svc.ListRepairs(ctx, app.RepairFilter{Stage: "repaired", Search: "Lappytop Crunchbook 480"})
 	if err != nil || page.Total != 1 {
 		t.Fatalf("demo stages: %+v %v", page, err)
 	}
@@ -99,9 +99,9 @@ func TestDemoSeedAndIdempotence(t *testing.T) {
 		t.Fatalf("need one intake + one log-entry photo, got %d/%d", intake, onEntry)
 	}
 
-	// demo-v2 coverage: parts (including an unknown cost and one removed
-	// line), an accepted estimate with a discount and a draft estimate, plus
-	// recorded pickup state, so every UI workflow has demo content.
+	// demo-v5 coverage: whole-piece parts (including an unknown cost and one
+	// removed line) plus recorded pickup state, so every remaining UI workflow
+	// has demo content.
 	parts, err := svc.ListRepairParts(ctx, 1, false)
 	if err != nil || len(parts) != 2 {
 		t.Fatalf("active parts on repair 1: %+v %v", parts, err)
@@ -121,14 +121,6 @@ func TestDemoSeedAndIdempotence(t *testing.T) {
 	}
 	if removedLines != 1 {
 		t.Fatalf("demo must show one removed part line: %+v", removed)
-	}
-	estimates, err := svc.ListEstimates(ctx, 1)
-	if err != nil || len(estimates) != 1 || estimates[0].Status != "accepted" || estimates[0].DiscountCents == 0 {
-		t.Fatalf("accepted demo estimate: %+v %v", estimates, err)
-	}
-	draft, err := svc.ListEstimates(ctx, 2)
-	if err != nil || len(draft) != 1 || draft[0].Status != "draft" {
-		t.Fatalf("draft demo estimate: %+v %v", draft, err)
 	}
 	picked, err := svc.GetRepair(ctx, 1, false)
 	if err != nil || picked.PickedUpBy == "" || picked.PickupAt == "" {

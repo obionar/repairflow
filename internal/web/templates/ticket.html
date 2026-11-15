@@ -15,6 +15,19 @@
     {{if .Data.Repair.ArchivedAt}}<span class="stage">{{$.Tr "common.archived"}} <time datetime="{{.Data.Repair.ArchivedAt}}">{{date .Data.Repair.ArchivedAt}}</time></span>{{end}}
   </p>
 
+  {{if .Session.CanWrite}}
+  <div class="label-actions">
+  {{if .Data.LabelDriver}}
+  <form method="post" action="/repairs/{{.Data.Repair.ID}}/label" id="label-form">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <button type="submit" id="label-print">{{$.Tr "repair.print_label"}}</button>
+  </form>
+  {{else}}
+  <p class="muted">{{$.Tr "repair.label_off"}}</p>
+  {{end}}
+  </div>
+  {{end}}
+
   {{if .Data.Form.Conflict}}
   <details class="conflict-review" open>
     <summary>{{$.Tr "common.conflict_summary"}}</summary>
@@ -25,7 +38,6 @@
       <div><dt>{{$.Tr "repair_new.model"}}</dt><dd>{{or .Data.Repair.Model "—"}}</dd></div>
       <div><dt>{{$.Tr "repair_new.serial"}}</dt><dd>{{or .Data.Repair.Serial "—"}}</dd></div>
       <div><dt>{{$.Tr "repair_new.issue"}}</dt><dd class="verbatim">{{.Data.Repair.Issue}}</dd></div>
-      <div><dt>{{$.Tr "common.notes"}}</dt><dd>{{or .Data.Repair.Notes "—"}}</dd></div>
     </dl>
   </details>
   {{end}}
@@ -45,7 +57,6 @@
       <div class="field"><label for="brand">{{$.Tr "repair_new.brand"}}</label><input id="brand" name="brand" value="{{.Data.Form.Brand}}" maxlength="200"></div>
       <div class="field"><label for="model">{{$.Tr "repair_new.model"}}</label><input id="model" name="model" value="{{.Data.Form.Model}}" maxlength="200"></div>
       <div class="field"><label for="serial">{{$.Tr "repair_new.serial"}}</label><input id="serial" name="serial" value="{{.Data.Form.Serial}}" maxlength="200"></div>
-      <div class="field"><label for="notes">{{$.Tr "common.notes"}}</label><textarea id="notes" name="notes" rows="2" maxlength="5000">{{.Data.Form.Notes}}</textarea></div>
       <div class="field field-full"><label for="issue">{{$.Tr "repair_new.issue"}}</label><textarea id="issue" name="issue" rows="3" required maxlength="5000">{{.Data.Form.Issue}}</textarea></div>
     </div>
     <div class="form-actions"><button class="primary" type="submit" id="details-save">{{$.Tr "repair.save_details"}}</button></div>
@@ -57,7 +68,6 @@
     <div><dt>{{$.Tr "repair_new.brand"}}</dt><dd>{{or .Data.Repair.Brand "—"}}</dd></div>
     <div><dt>{{$.Tr "repair_new.model"}}</dt><dd>{{or .Data.Repair.Model "—"}}</dd></div>
     <div><dt>{{$.Tr "repair_new.serial"}}</dt><dd>{{or .Data.Repair.Serial "—"}}</dd></div>
-    <div><dt>{{$.Tr "common.notes"}}</dt><dd>{{or .Data.Repair.Notes "—"}}</dd></div>
     <div><dt>{{$.Tr "repair_new.issue"}}</dt><dd class="verbatim">{{.Data.Repair.Issue}}</dd></div>
   </dl>
   {{end}}
@@ -69,8 +79,7 @@
       <div class="field">
         <label for="stage">{{$.Tr "repair.stage"}}</label>
         <select id="stage" name="stage" required>
-          <option value="">{{$.Tr "repair.select_stage"}}</option>
-          {{range .Data.Stages}}<option value="{{.}}"{{if eq . $.Data.Repair.Stage}} disabled>{{$.Tr (printf "stage.%s" .)}} {{$.Tr "repairs.current"}}{{else}}>{{$.Tr (printf "stage.%s" .)}}{{end}}</option>{{end}}
+          {{range .Data.Stages}}<option value="{{.}}"{{if eq . $.Data.Repair.Stage}} selected{{end}}>{{$.Tr (printf "stage.%s" .)}}</option>{{end}}
         </select>
       </div>
       {{if terminalStage .Data.Repair.Stage}}
@@ -79,19 +88,14 @@
       <div class="form-actions"><button type="submit" id="stage-submit">{{$.Tr "repair.update_stage"}}</button></div>
     </form>
   </div>
+  {{if .Data.Repair.ArchivedAt}}
   <div class="record-secondary">
-    {{if .Data.Repair.ArchivedAt}}
     <form method="post" action="/repairs/{{.Data.Repair.ID}}/unarchive" id="ticket-unarchive-form">
       <input type="hidden" name="csrf_token" value="{{.CSRF}}">
       <button class="quiet" type="submit" id="ticket-unarchive">{{$.Tr "repair.unarchive"}}</button>
     </form>
-    {{else}}
-    <form method="post" action="/repairs/{{.Data.Repair.ID}}/archive" id="ticket-archive-form">
-      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
-      <button class="quiet" type="submit" id="ticket-archive">{{$.Tr "repair.archive"}}</button>
-    </form>
-    {{end}}
   </div>
+  {{end}}
   {{end}}
   </div>
 </details>
@@ -112,12 +116,13 @@
       </div>
       <p class="entry-text">{{.Body}}</p>
       {{if $.Session.CanWrite}}
-      <details class="entry-edit" id="entry-edit-panel-{{.ID}}">
+      {{$draft := index $.Data.EntryDrafts .ID}}
+      <details class="entry-edit" id="entry-edit-panel-{{.ID}}"{{if $draft}} open{{end}}>
         <summary id="entry-edit-toggle-{{.ID}}">{{$.Tr "repair.correct_entry" .ID}}</summary>
         <form method="post" action="/repairs/{{$.Data.Repair.ID}}/entries/{{.ID}}/edit">
           <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
-          <input type="hidden" name="kind" value="{{.Kind}}">
-          <div class="field"><label for="body-{{.ID}}">{{$.Tr "repair.corrected_text"}}</label><textarea id="body-{{.ID}}" name="body" rows="3" required maxlength="10000">{{.Body}}</textarea></div>
+          <input type="hidden" name="kind" value="{{if $draft}}{{$draft.Kind}}{{else}}{{.Kind}}{{end}}">
+          <div class="field"><label for="body-{{.ID}}">{{$.Tr "repair.corrected_text"}}</label><textarea id="body-{{.ID}}" name="body" rows="3" required maxlength="10000">{{if $draft}}{{$draft.Body}}{{else}}{{.Body}}{{end}}</textarea></div>
           <div class="form-actions"><button type="submit" id="entry-edit-{{.ID}}">{{$.Tr "repair.save_correction"}}</button></div>
         </form>
       </details>
@@ -141,6 +146,9 @@
       <li class="entry-card deleted-entry" id="deleted-entry-{{.ID}}">
         <div class="entry-meta"><time datetime="{{.CreatedAt}}">{{when .CreatedAt}}</time><span class="entry-kind-badge">{{$.Tr (printf "kind.%s" .Kind)}}</span></div>
         <p class="entry-text">{{.Body}}</p>
+        {{$entryID := .ID}}{{with index $.Data.EntryDrafts .ID}}
+        <div class="field"><label for="body-{{$entryID}}">{{$.Tr "repair.corrected_text"}}</label><textarea id="body-{{$entryID}}" rows="3" readonly>{{.Body}}</textarea></div>
+        {{end}}
         {{if $.Session.CanWrite}}
         <form method="post" action="/repairs/{{$.Data.Repair.ID}}/entries/{{.ID}}/restore">
           <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
@@ -181,8 +189,7 @@
     <input type="hidden" name="csrf_token" value="{{.CSRF}}">
     <div class="fields part-fields">
       <div class="field"><label for="description">{{$.Tr "repair.description"}}</label><input id="description" name="description" value="{{.Data.PartForm.Fields.description}}" required maxlength="300"></div>
-      <div class="field"><label for="quantity">{{$.Tr "repair.quantity"}}</label><input id="quantity" name="quantity" value="{{.Data.PartForm.Fields.quantity}}" required inputmode="decimal" placeholder="1.5"></div>
-      <div class="field"><label for="unit">{{$.Tr "repair.unit"}}</label><input id="unit" name="unit" value="{{.Data.PartForm.Fields.unit}}" maxlength="20"></div>
+      <div class="field"><label for="quantity">{{$.Tr "repair.quantity"}}</label><input id="quantity" name="quantity" value="{{.Data.PartForm.Fields.quantity}}" required inputmode="numeric" min="1" step="1" placeholder="1"></div>
       <div class="field"><label for="unit_cost">{{$.Tr "repair.unit_cost"}}</label><input id="unit_cost" name="unit_cost" value="{{.Data.PartForm.Fields.unit_cost}}" inputmode="decimal" placeholder="12.34"></div>
       <div class="field"><label for="unit_price">{{$.Tr "repair.unit_price"}}</label><input id="unit_price" name="unit_price" value="{{.Data.PartForm.Fields.unit_price}}" required inputmode="decimal" placeholder="24.99"></div>
     </div>
@@ -195,7 +202,7 @@
       <thead><tr><th scope="col">{{$.Tr "repair.description"}}</th><th scope="col">{{$.Tr "repair.quantity"}}</th><th scope="col">{{$.Tr "repair.unit_price"}}</th><th scope="col">{{$.Tr "repair.line_total"}}</th>{{if $.Session.CanWrite}}<th scope="col">{{$.Tr "repair.actions"}}</th>{{end}}</tr></thead>
       <tbody>{{range .Data.Parts}}<tr id="part-{{.ID}}">
         <td data-label="{{$.Tr "repair.description"}}">{{.Description}}</td>
-        <td data-label="{{$.Tr "repair.quantity"}}">{{milli .QuantityMilli}} {{.Unit}}</td>
+        <td data-label="{{$.Tr "repair.quantity"}}">{{pcs .QuantityMilli}} pcs</td>
         <td data-label="{{$.Tr "repair.unit_price"}}">{{cents .UnitPriceCents}} {{.Currency}}</td>
         <td data-label="{{$.Tr "repair.line_total"}}"><strong>{{lineTotal .QuantityMilli .UnitPriceCents}} {{.Currency}}</strong></td>
         {{if $.Session.CanWrite}}
@@ -208,8 +215,7 @@
               <input type="hidden" name="revision" value="{{.Revision}}">
               <div class="fields part-fields">
                 <div class="field"><label for="part-description-{{.ID}}">{{$.Tr "repair.description"}}</label><input id="part-description-{{.ID}}" name="description" value="{{.Fields.description}}" required maxlength="300"></div>
-                <div class="field"><label for="part-quantity-{{.ID}}">{{$.Tr "repair.quantity"}}</label><input id="part-quantity-{{.ID}}" name="quantity" value="{{.Fields.quantity}}" required inputmode="decimal"></div>
-                <div class="field"><label for="part-unit-{{.ID}}">{{$.Tr "repair.unit"}}</label><input id="part-unit-{{.ID}}" name="unit" value="{{.Fields.unit}}" maxlength="20"></div>
+                <div class="field"><label for="part-quantity-{{.ID}}">{{$.Tr "repair.quantity"}}</label><input id="part-quantity-{{.ID}}" name="quantity" value="{{.Fields.quantity}}" required inputmode="numeric" min="1" step="1"></div>
                 <div class="field"><label for="part-cost-{{.ID}}">{{$.Tr "repair.unit_cost"}}</label><input id="part-cost-{{.ID}}" name="unit_cost" value="{{.Fields.unit_cost}}" inputmode="decimal"></div>
                 <div class="field"><label for="part-price-{{.ID}}">{{$.Tr "repair.unit_price"}}</label><input id="part-price-{{.ID}}" name="unit_price" value="{{.Fields.unit_price}}" required inputmode="decimal"></div>
               </div>
@@ -233,7 +239,7 @@
     <ul class="line-list">{{range .Data.DeletedParts}}
       <li id="deleted-part-{{.ID}}">
         <span class="line-main">{{.Description}}</span>
-        <span class="line-meta">{{milli .QuantityMilli}} {{.Unit}}</span>
+        <span class="line-meta">{{pcs .QuantityMilli}} pcs</span>
         <span class="line-total">{{lineTotal .QuantityMilli .UnitPriceCents}} {{.Currency}}</span>
         {{if $.Session.CanWrite}}
         <span class="line-actions"><form class="inline" method="post" action="/repairs/{{$.Data.Repair.ID}}/parts/{{.ID}}/restore">
@@ -245,46 +251,6 @@
     {{end}}</ul>
   </details>
   {{end}}
-  </div>
-</details>
-
-<details class="panel fold-panel" id="estimates-panel" open>
-  <summary class="section-heading"><h2>{{$.Tr "repair.estimates"}}</h2></summary>
-  <div class="panel-body">
-  {{if .Session.CanWrite}}
-  <form id="estimate-form" method="post" action="/repairs/{{.Data.Repair.ID}}/estimates">
-    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
-    <div class="fields">
-      <div class="field"><label for="note">{{$.Tr "repair.note"}}</label><input id="note" name="note" value="{{.Data.EstimateForm.Note}}" maxlength="2000"></div>
-      <div class="field"><label for="discount_percent">{{$.Tr "repair.discount"}}</label><input id="discount_percent" name="discount_percent" value="{{.Data.EstimateForm.Discount}}" inputmode="numeric" placeholder="10"></div>
-    </div>
-    <div class="form-actions"><button type="submit" id="estimate-submit">{{$.Tr "repair.create_estimate"}}</button></div>
-  </form>
-  {{end}}
-  {{if .Data.Estimates}}
-  <ul class="line-list" id="estimate-list">{{range .Data.Estimates}}
-    {{$currency := .Currency}}
-    <li id="estimate-{{.ID}}">
-      <span class="line-main">v{{.Version}} <span class="estimate-status">{{$.Tr (printf "estimate.status_%s" .Status)}}</span></span>
-      <span class="line-meta">{{$.Pl "repair.lines" (len .Lines)}}</span>
-      <span class="line-total">{{cents .TotalCents}} {{.Currency}}</span>
-      {{if and $.Session.CanWrite (eq .Status "draft")}}
-      <span class="line-actions"><form class="inline" method="post" action="/repairs/{{$.Data.Repair.ID}}/estimates/{{.ID}}/accept">
-        <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
-        <button class="quiet" type="submit" id="estimate-accept-{{.ID}}">{{$.Tr "repair.accept"}}</button>
-      </form></span>
-      {{end}}
-      {{if .Lines}}
-      <details class="estimate-lines">
-        <summary>{{$.Tr "repair.line_items"}}</summary>
-        <ul class="history-list">{{range .Lines}}
-          <li>{{.Description}} — {{milli .QuantityMilli}} {{.Unit}} × {{cents .UnitPriceCents}} = {{cents .LineTotalCents}} {{$currency}}</li>
-        {{end}}</ul>
-      </details>
-      {{end}}
-    </li>
-  {{end}}</ul>
-  {{else}}<p class="muted">{{$.Tr "repair.no_estimates"}}</p>{{end}}
   </div>
 </details>
 
@@ -386,9 +352,8 @@
   <form id="pickup-form" method="post" action="/repairs/{{.Data.Repair.ID}}/pickup">
     <input type="hidden" name="csrf_token" value="{{.CSRF}}">
     <div class="fields">
-      <div class="field"><label for="pickup_at">{{$.Tr "repair.collected_at"}}</label><input id="pickup_at" name="pickup_at" type="date" required></div>
-      <div class="field"><label for="picked_up_by">{{$.Tr "repair.collected_by"}}</label><input id="picked_up_by" name="picked_up_by" required maxlength="200"></div>
-      <div class="field"><label for="pickup_notes">{{$.Tr "common.notes"}}</label><input id="pickup_notes" name="pickup_notes" maxlength="5000"></div>
+      <div class="field"><label for="picked_up_by">{{$.Tr "repair.collected_by"}}</label><input id="picked_up_by" name="picked_up_by" value="{{.Data.PickupForm.By}}" required maxlength="200"></div>
+      <div class="field"><label for="pickup_notes">{{$.Tr "common.notes"}}</label><input id="pickup_notes" name="pickup_notes" value="{{.Data.PickupForm.Notes}}" maxlength="5000"></div>
     </div>
     <div class="form-actions"><button type="submit" id="pickup-submit">{{if .Data.Repair.PickupAt}}{{$.Tr "repair.update_pickup"}}{{else}}{{$.Tr "repair.record_pickup"}}{{end}}</button></div>
   </form>

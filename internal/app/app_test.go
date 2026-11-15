@@ -361,6 +361,56 @@ func TestDashboardQueues(t *testing.T) {
 	}
 }
 
+// TestDashboardQueuesAreBounded: both dashboard previews stop at the queue
+// limit so the page stays usable after months of uncollected repairs, while
+// the counts keep reporting the true totals and the repairs list is complete.
+func TestDashboardQueuesAreBounded(t *testing.T) {
+	ctx := context.Background()
+	svc := newService(t)
+	c, err := svc.CreateCustomer(ctx, "tester", app.CustomerInput{Name: "Cust"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 10 open repairs and 10 awaiting collection: more than the limit of 8.
+	var readyIDs []int64
+	for i := 0; i < 20; i++ {
+		repair, err := svc.CreateRepair(ctx, "tester", app.RepairInput{CustomerID: c.ID, Device: "D", Issue: "I"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if i < 10 {
+			if _, err := svc.SetRepairStage(ctx, "tester", repair.ID, "in_progress", false); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if _, err := svc.SetRepairStage(ctx, "tester", repair.ID, "in_progress", false); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := svc.SetRepairStage(ctx, "tester", repair.ID, "repaired", false); err != nil {
+			t.Fatal(err)
+		}
+		readyIDs = append(readyIDs, repair.ID)
+	}
+
+	queues, err := svc.Dashboard(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if queues.OpenCount != 10 || queues.AwaitingPickup != 10 {
+		t.Fatalf("counts must report the true totals: %+v", queues)
+	}
+	if len(queues.Workbench) != 8 || len(queues.ReadyForCollection) != 8 {
+		t.Fatalf("both previews must be bounded at 8: workbench=%d ready=%d",
+			len(queues.Workbench), len(queues.ReadyForCollection))
+	}
+	// Oldest first: the first collection-ready repair must be the earliest one.
+	if queues.ReadyForCollection[0].ID != readyIDs[0] {
+		t.Fatalf("ready queue must list the oldest uncollected repair first: got %d want %d",
+			queues.ReadyForCollection[0].ID, readyIDs[0])
+	}
+}
+
 func TestRepairListingFilters(t *testing.T) {
 	ctx := context.Background()
 	svc := newService(t)
@@ -567,12 +617,12 @@ func TestEntryEditSoftDeleteRecover(t *testing.T) {
 	if edited.Body != "Corrected text" {
 		t.Fatalf("edited: %+v", edited)
 	}
-	revs, err := svc.ListEntryRevisions(ctx, e.ID)
-	if err != nil || len(revs) != 1 {
+	revs, err := svc.ListRepairEntryRevisions(ctx, tk.ID)
+	if err != nil || len(revs[e.ID]) != 1 {
 		t.Fatalf("revisions: %+v %v", revs, err)
 	}
-	if revs[0].PrevBody != "Wrong text" || revs[0].Actor != "tester" {
-		t.Fatalf("revision snapshot: %+v", revs[0])
+	if got := revs[e.ID][0]; got.PrevBody != "Wrong text" || got.Actor != "tester" {
+		t.Fatalf("revision snapshot: %+v", got)
 	}
 
 	// No-op edit is a conflict, not a silent duplicate revision.
@@ -606,8 +656,8 @@ func TestEntryEditSoftDeleteRecover(t *testing.T) {
 	}
 
 	// History never physically deleted: revision rows survive everything.
-	revs, _ = svc.ListEntryRevisions(ctx, e.ID)
-	if len(revs) != 1 {
+	revs, _ = svc.ListRepairEntryRevisions(ctx, tk.ID)
+	if len(revs[e.ID]) != 1 {
 		t.Fatalf("revisions lost: %+v", revs)
 	}
 }
@@ -1086,10 +1136,15 @@ func TestWorkspaceCleanupNeverTouchesUserData(t *testing.T) {
 	}
 	stale := filepath.Join(home, "run", "upload-stale.part")
 	fresh := filepath.Join(home, "run", "upload-fresh.part")
+	staleMultipart := filepath.Join(home, "run", "multipart-stale")
+	freshMultipart := filepath.Join(home, "run", "multipart-fresh")
 	testutil.Must(t, os.WriteFile(stale, []byte("stale"), 0o600))
 	testutil.Must(t, os.WriteFile(fresh, []byte("fresh"), 0o600))
+	testutil.Must(t, os.WriteFile(staleMultipart, []byte("stale"), 0o600))
+	testutil.Must(t, os.WriteFile(freshMultipart, []byte("fresh"), 0o600))
 	old := time.Now().Add(-2 * time.Hour)
 	testutil.Must(t, os.Chtimes(stale, old, old))
+	testutil.Must(t, os.Chtimes(staleMultipart, old, old))
 	testutil.Must(t, os.WriteFile(filepath.Join(home, "cache", "thumb"), []byte("c"), 0o600))
 	userFile := filepath.Join(home, "files", "tickets", "1", strings.Repeat("a", 32))
 	testutil.Must(t, os.MkdirAll(filepath.Dir(userFile), 0o700))
@@ -1099,11 +1154,26 @@ func TestWorkspaceCleanupNeverTouchesUserData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.StagingRemoved) != 1 || res.StagingRemoved[0] != filepath.Join("run", "upload-stale.part") {
+	if len(res.StagingRemoved) != 2 {
 		t.Fatalf("staging cleanup: %+v", res)
+	}
+	removed := map[string]bool{}
+	for _, p := range res.StagingRemoved {
+		removed[p] = true
+	}
+	for _, want := range []string{"run/upload-stale.part", "run/multipart-stale"} {
+		if !removed[want] {
+			t.Fatalf("staging cleanup missing %q: %+v", want, res)
+		}
 	}
 	if _, err := os.Stat(fresh); err != nil {
 		t.Fatal("fresh staging must be kept (in-flight operation)")
+	}
+	if _, err := os.Stat(freshMultipart); err != nil {
+		t.Fatal("fresh multipart staging must be kept")
+	}
+	if _, err := os.Stat(staleMultipart); !os.IsNotExist(err) {
+		t.Fatal("stale multipart spill must be removed")
 	}
 	if _, err := os.Stat(userFile); err != nil {
 		t.Fatal("cleanup must never touch user files")
@@ -1171,5 +1241,40 @@ func TestAttachmentPreviewBounds(t *testing.T) {
 		if got.ID == a.ID && !got.PreviewInline {
 			t.Fatal("list must report the small image as inline")
 		}
+	}
+}
+
+// The gallery reads all attachment links in one query; each attachment must
+// still get its own links.
+func TestListRepairAttachmentsKeepsPerAttachmentLinks(t *testing.T) {
+	ctx := context.Background()
+	svc, _ := newAttachmentService(t)
+	c, _ := svc.CreateCustomer(ctx, "tester", app.CustomerInput{Name: "Cust"})
+	r, _ := svc.CreateRepair(ctx, "tester", app.RepairInput{CustomerID: c.ID, Device: "D", Issue: "I"})
+	e1, _ := svc.AddRepairEntry(ctx, "tester", r.ID, "work", "first")
+	e2, _ := svc.AddRepairEntry(ctx, "tester", r.ID, "test", "second")
+
+	first, err := svc.AddAttachment(ctx, "tester", r.ID, e1.ID, "a.png", bytes.NewReader([]byte("first bytes")), "", "cli")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := svc.AddAttachment(ctx, "tester", r.ID, e2.ID, "b.png", bytes.NewReader([]byte("second bytes")), "", "cli")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	list, err := svc.ListRepairAttachments(ctx, r.ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[int64][]int64{}
+	for _, a := range list {
+		got[a.ID] = a.EntryIDs
+	}
+	if len(got[first.ID]) != 1 || got[first.ID][0] != e1.ID {
+		t.Fatalf("first attachment links = %v, want [%d]", got[first.ID], e1.ID)
+	}
+	if len(got[second.ID]) != 1 || got[second.ID][0] != e2.ID {
+		t.Fatalf("second attachment links = %v, want [%d]", got[second.ID], e2.ID)
 	}
 }

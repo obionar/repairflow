@@ -20,7 +20,7 @@ Screenshots from the demo workspace (`init --demo`), which carries entirely synt
 
 ![Repair list with search, stage and customer columns](docs/screenshots/repairs.png)
 
-![One repair: stage controls, work log, parts, estimates and audit activity](docs/screenshots/repair-detail.png)
+![One repair: status controls, work log, parts and audit activity](docs/screenshots/repair-detail.png)
 
 <p align="center">
   <img src="docs/screenshots/repairs-mobile.png" width="300" alt="Repair list on a phone">
@@ -36,7 +36,7 @@ The new-repair form with the customer picker:
 - Moves work through seven repair stages, with an explicit audit trail for reopening finished work.
 - Keeps dated work, test, customer-contact, handover and note entries; corrections retain their
   previous revisions.
-- Records parts and creates immutable, versioned estimates using integer money values.
+- Records whole-piece parts in the web repair page; the CLI retains versioned estimates for compatibility.
 - Stores original attachments with SHA-256 hashes, captions, galleries and links to log entries.
 - Separates pickup from repair stage and archives old records without destroying their history.
 - Provides admin, technician and viewer accounts for the web interface.
@@ -72,6 +72,20 @@ make build
 ./scripts/run-demo.sh
 ```
 
+The short public demo path is also available from the repository root:
+
+```bash
+git clone https://github.com/obionar/repairflow
+cd repairflow/demo
+./run-demo.sh
+```
+
+The `demo/` launcher uses an existing binary, builds from source when Go is
+available, or downloads and checksum-verifies the matching Linux release into
+`demo/bin/`. It creates a temporary synthetic workspace, serves it and removes
+it on exit. For a persistent contributor workspace use `cd demo && ./dev.sh`;
+reset it with `./reset.sh`. No database is committed.
+
 To try the demo without Go, initialize a temporary workspace explicitly:
 
 ```bash
@@ -94,6 +108,10 @@ The launcher creates a temporary synthetic workspace and deletes it when you pre
 Never use these public demo credentials for a real workspace.
 
 ### Start a real workspace
+
+The default install is `/usr/local/bin/repairflow`, owned by root so a regular user can execute it
+but not replace it; the installer uses `doas` or `sudo` only for that step. The workspace remains
+`~/.repairflow` unless you pass `--home` or set `REPAIRFLOW_HOME`.
 
 After [installing the executable](docs/INSTALL.md) as `repairflow`:
 
@@ -118,6 +136,7 @@ release verification, roles and troubleshooting.
 - [Security](docs/SECURITY.md) — protections, trust boundaries and operational limits.
 - [Translations](docs/TRANSLATIONS.md) — language coverage and translation workflow.
 - [Development](docs/DEVELOPMENT.md) — build, test and contribution workflow.
+- [Workshop bench testing](docs/BENCH-TEST.md) — isolated hardware/workflow and recovery checks.
 - [Architecture](docs/ARCHITECTURE.md) — components, domain rules, schema and failure handling.
 - [Project map](docs/PROJECT_MAP.md) — source packages and contract locations.
 

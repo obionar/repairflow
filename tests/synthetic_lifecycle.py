@@ -50,11 +50,11 @@ def main():
         customers.append(run("customer", "add", "--name", name, "--phone", phone, json_out=True)["data"]["id"])
 
     devices = [
-        ("Kenwood amplifier KA-501", "No sound on the left channel"),
-        ("Dell XPS 13 laptop", "Does not power on"),
-        ("Boss DS-1 effects pedal", "Intermittent bypass switch"),
-        ("Behringer audio mixer", "Channel 3 distorted"),
-        ("iPhone 12", "Cracked screen"),
+        ("Kettlebell Amplifier KA-501", "No sound on the left channel"),
+        ("Dusty Laptop 13", "Does not power on"),
+        ("Bossy DS-1 effects pedal", "Intermittent bypass switch"),
+        ("Befuddled Audio Mixer", "Channel 3 distorted"),
+        ("Pocket Rectangle 12", "Cracked screen"),
     ]
     tickets = []
     for customer, (device, issue) in zip(customers, devices):
@@ -105,7 +105,7 @@ def main():
     # Search/list and JSON shapes.
     listed = run("ticket", "list", "--search", "laptop", json_out=True)
     assert listed["data"]["total"] == 1, listed
-    assert run("ticket", "show", str(tickets[1]), json_out=True)["data"]["device"] == "Dell XPS 13 laptop"
+    assert run("ticket", "show", str(tickets[1]), json_out=True)["data"]["device"] == "Dusty Laptop 13"
     assert run("attachment", "list", "--ticket", str(tickets[1]), json_out=True)["data"][0]["caption"] == "intake photo"
     run("doctor")
     run("status")
@@ -124,7 +124,7 @@ def main():
     proc = subprocess.run([BIN, "doctor", "--home", str(RESTORE)], text=True, capture_output=True)
     assert proc.returncode == 0, proc.stderr
     proc = subprocess.run([BIN, "ticket", "show", str(tickets[1]), "--home", str(RESTORE), "--json"], text=True, capture_output=True)
-    assert proc.returncode == 0 and "Dell XPS 13 laptop" in proc.stdout, proc.stderr
+    assert proc.returncode == 0 and "Dusty Laptop 13" in proc.stdout, proc.stderr
     print("PASS: synthetic lifecycle, JSON/text CLI, attachments, estimates, backup/restore")
 
 

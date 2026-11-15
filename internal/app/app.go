@@ -16,6 +16,7 @@ import (
 
 	"repairflow/internal/errs"
 	"repairflow/internal/files"
+	"repairflow/internal/printer"
 )
 
 // Service exposes the domain operations. Construct one per open database.
@@ -23,6 +24,11 @@ type Service struct {
 	db    *sql.DB
 	now   func() time.Time
 	store *files.Store // bound via WithStore for attachment byte operations
+
+	// Label printing is delegated to the printer package; tests replace these
+	// so no test needs a printer or Bluetooth adapter.
+	printSticker func(ctx context.Context, driver string, id int64, name string) error
+	printTest    func(ctx context.Context, driver string) error
 }
 
 // DB exposes the underlying handle for diagnostic queries (web auth audit
@@ -31,7 +37,16 @@ func (s *Service) DB() *sql.DB { return s.db }
 
 // New builds a service over an open database handle.
 func New(db *sql.DB) *Service {
-	return &Service{db: db, now: func() time.Time { return time.Now().UTC() }}
+	return &Service{db: db, now: func() time.Time { return time.Now().UTC() },
+		printSticker: printer.Sticker, printTest: printer.TestLabel}
+}
+
+// WithLabelPrinter replaces the label printer for tests. Production code uses
+// the p15 driver from New.
+func (s *Service) WithLabelPrinter(sticker func(context.Context, string, int64, string) error,
+	test func(context.Context, string) error) *Service {
+	s.printSticker, s.printTest = sticker, test
+	return s
 }
 
 func (s *Service) timestamp() string { return s.now().Format(time.RFC3339) }

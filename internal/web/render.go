@@ -18,6 +18,7 @@ type pageView struct {
 	CSRF      string
 	Data      any
 	Error     string
+	Notice    string
 	Now       string
 	Lang      string
 	Languages []i18n.Language
@@ -75,6 +76,16 @@ func (s *Server) renderTemplate(w http.ResponseWriter, r *http.Request, name str
 // message. It is used to keep submitted drafts on validation/conflict errors
 // instead of replacing the page with a generic error.
 func (s *Server) renderStatus(w http.ResponseWriter, r *http.Request, name, title string, sess app.Session, message string, data any, status int) {
+	s.renderPage(w, r, name, title, sess, message, "", data, status)
+}
+
+// renderNotice renders a page with a success line, used after a POST redirect
+// so a refresh does not repeat the action (and the label).
+func (s *Server) renderNotice(w http.ResponseWriter, r *http.Request, name, title string, sess app.Session, notice string, data any) {
+	s.renderPage(w, r, name, title, sess, "", notice, data, http.StatusOK)
+}
+
+func (s *Server) renderPage(w http.ResponseWriter, r *http.Request, name, title string, sess app.Session, message, notice string, data any, status int) {
 	sessv := sessView(sess)
 	cat := s.catalogFor(r)
 	if status != http.StatusOK {
@@ -86,7 +97,7 @@ func (s *Server) renderStatus(w http.ResponseWriter, r *http.Request, name, titl
 	}
 	err := s.tmpl.ExecuteTemplate(w, name+".html", pageView{
 		Title: titleText, Active: activeFor(name), Session: sessv, CSRF: sess.CSRFToken,
-		Data: data, Error: message, Now: time.Now().UTC().Format("2006-01-02 15:04"),
+		Data: data, Error: message, Notice: notice, Now: time.Now().UTC().Format("2006-01-02 15:04"),
 		Lang: cat.Code, Languages: s.tr.Languages(), T: cat.T, N: cat.N,
 	})
 	if err != nil {

@@ -2,8 +2,10 @@ package web
 
 import (
 	"net/http"
+	"strconv"
 
 	"repairflow/internal/app"
+	"repairflow/internal/errs"
 )
 
 // partForm preserves operator input across validation/conflict errors. Values
@@ -16,10 +18,13 @@ type partForm struct {
 }
 
 func partFormOf(p app.Part) partForm {
+	quantity := strconv.FormatInt(p.QuantityMilli/1000, 10)
+	if p.QuantityMilli%1000 != 0 {
+		quantity = app.FormatQuantityMilli(p.QuantityMilli)
+	}
 	fields := map[string]string{
 		"description": p.Description,
-		"quantity":    app.FormatQuantityMilli(p.QuantityMilli),
-		"unit":        p.Unit,
+		"quantity":    quantity,
 		"unit_price":  app.FormatCents(p.UnitPriceCents),
 		"unit_cost":   "",
 	}
@@ -32,12 +37,9 @@ func partFormOf(p app.Part) partForm {
 func partFormFromRequest(r *http.Request, id int64) partForm {
 	return partForm{ID: id, Revision: r.FormValue("revision"), Draft: true, Fields: map[string]string{
 		"description": r.FormValue("description"), "quantity": r.FormValue("quantity"),
-		"unit": r.FormValue("unit"), "unit_cost": r.FormValue("unit_cost"),
-		"unit_price": r.FormValue("unit_price"),
+		"unit_cost": r.FormValue("unit_cost"), "unit_price": r.FormValue("unit_price"),
 	}}
 }
-
-type estimateForm struct{ Note, Discount string }
 
 // partFields parses the numeric fields shared by add and edit forms. The
 // service remains responsible for validation, money arithmetic and revisions.
@@ -45,6 +47,9 @@ func partFields(r *http.Request) (qtyMilli, price int64, cost *int64, err error)
 	qtyMilli, err = app.ParseQuantityMilli("quantity", r.FormValue("quantity"))
 	if err != nil {
 		return 0, 0, nil, err
+	}
+	if qtyMilli%1000 != 0 {
+		return 0, 0, nil, errs.New(errs.CodeValidation, "quantity must be a whole number of pieces (got %q)", r.FormValue("quantity"))
 	}
 	price, err = app.ParseCents("unit_price", r.FormValue("unit_price"))
 	if err != nil {
@@ -69,7 +74,7 @@ func (s *Server) repairPartAdd(w http.ResponseWriter, r *http.Request, sess app.
 	qty, price, cost, err := partFields(r)
 	if err == nil {
 		_, err = s.svc.AddRepairPart(r.Context(), actorOf(sess), id, app.PartInput{
-			Description: r.FormValue("description"), QuantityMilli: qty, Unit: r.FormValue("unit"),
+			Description: r.FormValue("description"), QuantityMilli: qty, Unit: app.UnitPieces,
 			UnitCostCents: cost, UnitPriceCents: price,
 		})
 	}
@@ -90,7 +95,7 @@ func (s *Server) repairPartUpdate(w http.ResponseWriter, r *http.Request, sess a
 	}
 	qty, price, cost, err := partFields(r)
 	if err == nil {
-		description, unit := r.FormValue("description"), r.FormValue("unit")
+		description, unit := r.FormValue("description"), app.UnitPieces
 		_, err = s.svc.UpdateRepairPart(r.Context(), actorOf(sess), partID, app.PartPatch{
 			Description: &description, QuantityMilli: &qty, Unit: &unit,
 			UnitCostCents: cost, ClearCost: r.FormValue("unit_cost") == "",
@@ -127,40 +132,4 @@ func (s *Server) repairPartRestore(w http.ResponseWriter, r *http.Request, sess 
 		_, err = s.svc.RestoreRepairPart(r.Context(), actorOf(sess), partID)
 		return err
 	})
-}
-
-func (s *Server) estimateAccept(w http.ResponseWriter, r *http.Request, sess app.Session) {
-	s.repairMutation(w, r, sess, func() error {
-		eid, err := pathID(r, "eid")
-		if err != nil {
-			return err
-		}
-		_, err = s.svc.AcceptEstimate(r.Context(), actorOf(sess), eid)
-		return err
-	})
-}
-
-func (s *Server) estimateCreate(w http.ResponseWriter, r *http.Request, sess app.Session) {
-	id, err := pathID(r, "id")
-	if err == nil {
-		in := app.EstimateInput{Note: r.FormValue("note"), DiscountKind: "none"}
-		if raw := r.FormValue("discount_percent"); raw != "" {
-			pct, perr := app.ParsePercent("discount_percent", raw)
-			if perr != nil {
-				err = perr
-			} else {
-				in.DiscountKind, in.DiscountValue = "percent", pct
-			}
-		}
-		if err == nil {
-			_, err = s.svc.CreateEstimate(r.Context(), actorOf(sess), id, in)
-		}
-	}
-	if err != nil {
-		s.repairFormError(w, r, sess, id, err, func(view *repairView) {
-			view.EstimateForm = estimateForm{Note: r.FormValue("note"), Discount: r.FormValue("discount_percent")}
-		})
-		return
-	}
-	redirectBack(w, r, "/repairs/"+itoa(id))
 }

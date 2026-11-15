@@ -13,6 +13,7 @@ import (
 // discarded.
 type customerForm struct {
 	Name, Phone, Email, Address, Notes, Revision string
+	IDKey                                        string
 	Draft, Conflict                              bool
 }
 
@@ -40,17 +41,18 @@ func (s *Server) customerList(w http.ResponseWriter, r *http.Request, sess app.S
 }
 
 func (s *Server) customerNew(w http.ResponseWriter, r *http.Request, sess app.Session) {
-	s.render(w, r, "customer_new", "customer_new.title", sess, map[string]any{"Form": customerForm{}})
+	s.render(w, r, "customer_new", "customer_new.title", sess, map[string]any{"Form": customerForm{IDKey: newIdempotencyKey()}})
 }
 
 func (s *Server) customerCreate(w http.ResponseWriter, r *http.Request, sess app.Session) {
 	form := customerForm{
 		Name: r.FormValue("name"), Phone: r.FormValue("phone"),
-		Email: r.FormValue("email"), Address: r.FormValue("address"), Notes: r.FormValue("notes"), Draft: true,
+		Email: r.FormValue("email"), Address: r.FormValue("address"), Notes: r.FormValue("notes"),
+		IDKey: r.FormValue("idempotency_key"), Draft: true,
 	}
-	c, err := s.svc.CreateCustomer(r.Context(), actorOf(sess), app.CustomerInput{
+	c, err := s.svc.CreateCustomerWithKey(r.Context(), actorOf(sess), app.CustomerInput{
 		Name: form.Name, Phone: form.Phone, Email: form.Email, Address: form.Address, Notes: form.Notes,
-	})
+	}, app.NormalizeIdempotencyKey(form.IDKey))
 	if err != nil {
 		if draftable(err) {
 			s.renderStatus(w, r, "customer_new", "customer_new.title", sess, s.flashText(r, err),
@@ -80,13 +82,18 @@ func (s *Server) customerShow(w http.ResponseWriter, r *http.Request, sess app.S
 		s.renderError(w, r, sessView(sess), err, statusOf(err))
 		return
 	}
-	repairs, err := s.svc.ListRepairs(r.Context(), app.RepairFilter{CustomerID: id, PerPage: 50})
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	repairs, err := s.svc.ListRepairs(r.Context(), app.RepairFilter{
+		CustomerID: id, Page: page, PerPage: 20, IncludeArchived: true,
+	})
 	if err != nil {
 		s.renderError(w, r, sessView(sess), err, statusOf(err))
 		return
 	}
+	prev, next := pageBounds(repairs)
 	s.render(w, r, "customer", s.pageTitle(r, "customer.title", c.Name), sess, map[string]any{
 		"Customer": c, "History": history, "Repairs": repairs, "Form": customerFormOf(c),
+		"Prev": prev, "Next": next,
 	})
 }
 
@@ -132,7 +139,7 @@ func (s *Server) customerUpdate(w http.ResponseWriter, r *http.Request, sess app
 				s.renderError(w, r, sessView(sess), herr, statusOf(herr))
 				return
 			}
-			repairs, terr := s.svc.ListRepairs(r.Context(), app.RepairFilter{CustomerID: id, PerPage: 50})
+			repairs, terr := s.svc.ListRepairs(r.Context(), app.RepairFilter{CustomerID: id, PerPage: 20, IncludeArchived: true})
 			if terr != nil {
 				s.renderError(w, r, sessView(sess), terr, statusOf(terr))
 				return
@@ -141,8 +148,10 @@ func (s *Server) customerUpdate(w http.ResponseWriter, r *http.Request, sess app
 				form.Revision = c.Revision
 				form.Conflict = true
 			}
+			prev, next := pageBounds(repairs)
 			s.renderStatus(w, r, "customer", s.pageTitle(r, "customer.title", c.Name), sess, s.flashText(r, err), map[string]any{
 				"Customer": c, "History": history, "Repairs": repairs, "Form": form,
+				"Prev": prev, "Next": next,
 			}, statusOf(err))
 			return
 		}

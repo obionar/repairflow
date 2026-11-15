@@ -66,9 +66,10 @@ demo reset --confirm
 `init` creates owner-only directories and writes configuration only when absent. Domain commands
 create and migrate the database explicitly. Newer schemas are refused.
 
-`doctor` checks the workspace, schema, database integrity, records, demo marker and attachment
-bytes. `cleanup` removes stale upload staging and cache only; it never removes business records,
-attachments, configuration, backups or recovery data.
+`doctor` checks the workspace, schema, database integrity, records, demo marker and the stored
+attachment bytes (size and SHA-256, so a large gallery takes longer). `cleanup` removes stale upload
+staging and cache only; it never removes business records, attachments, configuration, backups or
+recovery data.
 
 Demo seeding refuses existing business data. Reset requires unchanged synthetic content and keeps
 users and sessions. `--demo-user` creates an optional admin using `REPAIRFLOW_NEW_PASSWORD`; it never
@@ -105,6 +106,7 @@ repair entry-edit ENTRY_ID [--kind K] [--body B]
 repair entry-delete ENTRY_ID
 repair entry-restore ENTRY_ID
 repair pickup ID --at RFC3339|YYYY-MM-DD --by NAME [--notes N]
+repair label ID                     # print the intake sticker (needs the label printer selected)
 repair archive ID
 repair unarchive ID
 ```
@@ -127,10 +129,29 @@ no_repair     → in_progress with --reopen
 
 Lists are stable ID-descending pages, defaulting to 20 and capped at 100 items. Search wildcard
 characters are treated literally. Updates may supply the content-derived `revision` returned by
-`show`; a stale revision conflicts. Omitting it selects last-write-wins behavior.
+`show`; a stale revision conflicts. Omitting it selects last-write-wins behavior. The repair revision
+covers the editable device/issue/stage/notes fields and customer assignment.
 
 `ticket` remains a one-release alias for `repair`. JSON always reports the canonical `repair ...`
 command. Legacy `/tickets...` web paths redirect to `/repairs...` with HTTP 308.
+
+## Label printer
+
+```text
+printer show
+printer set p15|none
+printer test
+```
+
+`printer set` and `printer test` are administrator actions; the CLI runs outside the web
+authorization boundary and acts as an administrator. The setting is workspace-wide and stored in the
+database (schema v10), so it is included in backups and restores; an empty driver means printing is
+off. Printer-specific options (density, label size, printer name) remain in the p15 configuration.
+
+`repair label ID` prints one intake sticker with the repair number and customer name and records a
+`label` activity row. Printing requires `p15` to be installed for the same user on the host that runs
+RepairFlow. A failed print is reported with its reason and never retried automatically, because the
+label may already have reached paper.
 
 ## Parts and estimates
 
@@ -202,7 +223,10 @@ restore ARCHIVE --home PATH
 
 Backup output must be absolute and outside the source workspace. Restore targets a new, empty
 workspace only. Archives contain a consistent database snapshot, configuration and hash-verified
-original attachments; they are not encrypted.
+original attachments; they are not encrypted. Local `locales/` overrides are excluded.
+`backup verify` and restore share archive structure, size and hash checks. They validate any archived
+configuration, open the database snapshot, check its integrity and declared schema, and cross-check
+attachment sizes/hashes against the manifest. Verification is not a full restore rehearsal.
 
 ## Services and updates
 
@@ -221,15 +245,21 @@ help
 ```
 
 Service installation supports systemd user units and OpenRC scripts. `--name` selects an independent
-instance; units belonging to another instance are not overwritten or removed.
+instance; units belonging to another instance are not overwritten or removed. An existing file with
+no `managed-by=repairflow` marker is refused rather than replaced.
 
 Updates use local files only and require Ed25519 signature and SHA-256 verification. The optional
 `scripts/update-github.sh` downloads one exact public GitHub release archive into temporary storage,
 rejects unsafe archive paths, extracts the signed manifest and binary, then invokes these same local
-checks; it does not add an API, background polling or automatic restart.
+checks; it does not add an API, background polling or automatic restart. Automatic `sudo`/`doas`
+refuses symlink executables and requires root ownership and no group/world write permission for
+the binary and every parent directory (`stat` is required).
 `update apply` requires a signed release build with the trusted public key embedded. Regular-file,
 platform, version, size and hash checks are mandatory. Same-version installs, downgrades, symlinks and
-FIFOs are refused. Verified apply is Linux-only; restart through the service supervisor after success.
+FIFOs are refused. The target directory must be writable. Updates and source installs serialize with
+a lock next to the executable; the updater re-reads the installed version under that lock rather
+than trusting the invoking process's version. A root-owned installation needs `sudo`/`doas` for apply. Verified apply
+is Linux-only; restart through the service supervisor after success.
 
 `update keygen` creates `release-signing.pub` and `release-signing.key` exclusively. It refuses
 existing files or symlinks instead of overwriting them, writes the private key as owner-only `0600`,

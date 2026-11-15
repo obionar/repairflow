@@ -12,7 +12,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"repairflow/internal/config"
@@ -20,27 +19,15 @@ import (
 	"repairflow/internal/errs"
 )
 
-// Verify reads an archive end-to-end and validates structure, manifest and
-// every file hash. Corrupt, truncated or tampered archives are refused with
-// explicit errors; nothing is extracted.
+// Verify checks every payload's size/hash and database/config usability using
+// the same rules as Restore. Only the database and config are temporarily extracted.
 func Verify(ctx context.Context, archivePath string) (*Manifest, error) {
-	r, err := openArchive(archivePath)
+	tmp, err := os.MkdirTemp("", "repairflow-verify-*")
 	if err != nil {
-		return nil, err
+		return nil, errs.Wrap(errs.CodeInternal, err, "cannot create verification directory")
 	}
-	defer r.close()
-
-	manifest, err := r.readManifest()
-	if err != nil {
-		return nil, err
-	}
-	if err := checkManifest(manifest); err != nil {
-		return nil, err
-	}
-	if err := r.verifyEntries(manifest); err != nil {
-		return nil, err
-	}
-	return manifest, nil
+	defer func() { _ = os.RemoveAll(tmp) }()
+	return readAndVerify(ctx, archivePath, tmp, false)
 }
 
 // Restore validates the archive and publishes it into destHome, which must
@@ -72,12 +59,8 @@ func Restore(ctx context.Context, archivePath, destHome string) (*Manifest, erro
 		return nil, errs.Wrap(errs.CodeInternal, err, "cannot create restore staging")
 	}
 
-	manifest, err := extractAndVerify(ctx, archivePath, staging)
+	manifest, err := readAndVerify(ctx, archivePath, staging, true)
 	if err != nil {
-		cleanup()
-		return nil, err
-	}
-	if err := validateRestoredDB(ctx, staging, manifest); err != nil {
 		cleanup()
 		return nil, err
 	}
@@ -133,9 +116,9 @@ func ensureDest(destHome string) (bool, error) {
 	return true, nil
 }
 
-// extractAndVerify streams the archive into staging, verifying every entry
-// name and hash against the manifest and rejecting anything unexpected.
-func extractAndVerify(ctx context.Context, archivePath, staging string) (*Manifest, error) {
+// readAndVerify shares the archive and usability checks for verify and restore.
+// Verify discards attachment bytes after hashing; restore stages them for publication.
+func readAndVerify(ctx context.Context, archivePath, staging string, extract bool) (*Manifest, error) {
 	r, err := openArchive(archivePath)
 	if err != nil {
 		return nil, err
@@ -150,67 +133,34 @@ func extractAndVerify(ctx context.Context, archivePath, staging string) (*Manife
 		return nil, err
 	}
 
-	expect := expectedEntries(manifest)
-	seen := map[string]bool{}
-	for {
-		hdr, err := r.tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, errs.Wrap(errs.CodeValidation, err, "archive is corrupt or truncated")
-		}
-		if hdr.Typeflag != tar.TypeReg {
-			return nil, errs.New(errs.CodeValidation, "archive entry %q is not a regular file", hdr.Name)
-		}
-		wantHash, ok := expect[hdr.Name]
-		if !ok {
-			return nil, errs.New(errs.CodeValidation, "unexpected archive entry %q", hdr.Name)
-		}
-		if seen[hdr.Name] {
-			return nil, errs.New(errs.CodeValidation, "duplicate archive entry %q", hdr.Name)
-		}
-		seen[hdr.Name] = true
-
-		dst := filepath.Join(staging, filepath.FromSlash(hdr.Name))
-		if !strings.HasPrefix(dst, staging+string(filepath.Separator)) {
-			return nil, errs.New(errs.CodeValidation, "archive entry %q escapes the restore root", hdr.Name)
-		}
-		if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
-			return nil, errs.Wrap(errs.CodeInternal, err, "cannot create restore directory")
-		}
-		hash, size, err := writeVerified(dst, r.tr, hdr.Size)
-		if err != nil {
-			return nil, err
-		}
-		if hash != wantHash {
-			return nil, errs.New(errs.CodeValidation,
-				"archive entry %q fails integrity verification (manifest %s, got %s)", hdr.Name, wantHash, hash)
-		}
-		if _, err := io.Copy(io.Discard, r.tr); err != nil {
-			return nil, errs.Wrap(errs.CodeValidation, err, "archive is corrupt or truncated")
-		}
-		_ = size
+	if err := r.verifyEntries(manifest, staging, extract); err != nil {
+		return nil, err
 	}
-	for name := range expect {
-		if !seen[name] {
-			return nil, errs.New(errs.CodeValidation, "archive entry %q is missing", name)
+	if err := validateDatabaseFile(ctx, filepath.Join(staging, filepath.FromSlash(dbEntryName)), manifest); err != nil {
+		return nil, err
+	}
+	if manifest.Config != nil {
+		if _, err := config.Load(filepath.Join(staging, cfgEntryName)); err != nil {
+			return nil, errs.Wrap(errs.CodeValidation, err, "archive configuration is not usable")
 		}
 	}
 	return manifest, nil
 }
 
-// validateRestoredDB checks the restored database snapshot's integrity,
-// schema compatibility and attachment references before publishing.
-func validateRestoredDB(ctx context.Context, staging string, manifest *Manifest) error {
-	dbPath := filepath.Join(staging, filepath.FromSlash(dbEntryName))
+func validateDatabaseFile(ctx context.Context, dbPath string, manifest *Manifest) error {
 	handle, err := sql.Open(db.DriverName, dbPath)
 	if err != nil {
-		return errs.Wrap(errs.CodeValidation, err, "restored database cannot be opened")
+		return errs.Wrap(errs.CodeValidation, err, "database cannot be opened")
 	}
 	defer func() { _ = handle.Close() }()
+	return validateDatabaseHandle(ctx, handle, manifest)
+}
+
+// validateDatabaseHandle checks SQLite integrity, schema support and the
+// attachment rows against the manifest. It does not read attachment bytes.
+func validateDatabaseHandle(ctx context.Context, handle *sql.DB, manifest *Manifest) error {
 	if err := db.IntegrityCheck(ctx, handle); err != nil {
-		return errs.Wrap(errs.CodeValidation, err, "restored database failed integrity checks")
+		return errs.Wrap(errs.CodeValidation, err, "database failed integrity checks")
 	}
 	version, err := db.CurrentVersion(ctx, handle)
 	if err != nil {
@@ -218,28 +168,28 @@ func validateRestoredDB(ctx context.Context, staging string, manifest *Manifest)
 	}
 	if version < 1 || version > db.LatestVersion() {
 		return errs.New(errs.CodeConfigVersion,
-			"restored database schema version %d is not supported by this build (1..%d)", version, db.LatestVersion())
+			"database schema version %d is not supported by this build (1..%d)", version, db.LatestVersion())
 	}
 
-	// Attachment references and bytes must agree in the restored tree.
+	if version != manifest.SchemaVersion {
+		return errs.New(errs.CodeValidation, "database schema version %d does not match the manifest (%d)", version, manifest.SchemaVersion)
+	}
+
 	rows, err := handle.QueryContext(ctx,
-		`SELECT repair_id, storage_name, sha256 FROM attachments WHERE state != 'purged'`)
+		`SELECT repair_id, storage_name, size_bytes, sha256 FROM attachments WHERE state != 'purged'`)
 	if err != nil {
 		return errs.Wrap(errs.CodeValidation, err, "cannot read restored attachment records")
 	}
 	defer func() { _ = rows.Close() }()
-	type ref struct {
-		ticket int64
-		name   string
-		hash   string
-	}
-	var refs []ref
+	refs := map[string]FileEntry{}
 	for rows.Next() {
-		var r ref
-		if err := rows.Scan(&r.ticket, &r.name, &r.hash); err != nil {
+		var repair int64
+		var name string
+		var entry FileEntry
+		if err := rows.Scan(&repair, &name, &entry.SizeBytes, &entry.SHA256); err != nil {
 			return errs.Wrap(errs.CodeValidation, err, "cannot read restored attachment record")
 		}
-		refs = append(refs, r)
+		refs[fmt.Sprintf("%d/%s", repair, name)] = entry
 	}
 	if err := rows.Err(); err != nil {
 		return err
@@ -248,14 +198,10 @@ func validateRestoredDB(ctx context.Context, staging string, manifest *Manifest)
 		return errs.New(errs.CodeValidation,
 			"restored attachment records (%d) do not match the manifest (%d)", len(refs), len(manifest.Attachments))
 	}
-	for _, r := range refs {
-		file := filepath.Join(staging, "files", "tickets", strconv.FormatInt(r.ticket, 10), r.name)
-		hash, _, err := hashFile(file)
-		if err != nil {
-			return errs.Wrap(errs.CodeValidation, err, "restored attachment %d/%s has no bytes", r.ticket, r.name)
-		}
-		if hash != r.hash {
-			return errs.New(errs.CodeValidation, "restored attachment %d/%s fails hash verification", r.ticket, r.name)
+	for _, a := range manifest.Attachments {
+		key := fmt.Sprintf("%d/%s", a.TicketID, a.StorageName)
+		if ref, ok := refs[key]; !ok || ref.SHA256 != a.SHA256 || ref.SizeBytes != a.SizeBytes {
+			return errs.New(errs.CodeValidation, "manifest attachment %s does not match the database", key)
 		}
 	}
 	return nil
@@ -330,11 +276,27 @@ func (r *archiveReader) readManifest() (*Manifest, error) {
 	if err != nil {
 		return nil, errs.Wrap(errs.CodeValidation, err, "archive is empty, corrupt or truncated")
 	}
+	if hdr.Typeflag != tar.TypeReg {
+		return nil, errs.New(errs.CodeValidation, "archive manifest is not a regular file")
+	}
 	if hdr.Name != manifestName {
 		return nil, errs.New(errs.CodeValidation, "archive does not start with %s", manifestName)
 	}
+	return decodeManifest(r.tr)
+}
+
+// decodeManifest reads one bounded manifest. The writer uses the same bound.
+func decodeManifest(r io.Reader) (*Manifest, error) {
+	body, err := io.ReadAll(io.LimitReader(r, MaxManifestBytes+1))
+	if err != nil {
+		return nil, errs.Wrap(errs.CodeValidation, err, "archive manifest is corrupt")
+	}
+	if len(body) > MaxManifestBytes {
+		return nil, errs.New(errs.CodeValidation,
+			"archive manifest is larger than the %d-byte limit", MaxManifestBytes)
+	}
 	var m Manifest
-	if err := json.NewDecoder(io.LimitReader(r.tr, 4<<20)).Decode(&m); err != nil {
+	if err := json.Unmarshal(body, &m); err != nil {
 		return nil, errs.Wrap(errs.CodeValidation, err, "archive manifest is corrupt")
 	}
 	return &m, nil
@@ -347,36 +309,36 @@ func checkManifest(m *Manifest) error {
 	if m.SchemaVersion < 1 {
 		return errs.New(errs.CodeValidation, "backup manifest has no valid schema version")
 	}
-	if m.Database.Name != dbEntryName || !sha64Re.MatchString(m.Database.SHA256) {
+	if m.Database.Name != dbEntryName || m.Database.SizeBytes <= 0 || !sha64Re.MatchString(m.Database.SHA256) {
 		return errs.New(errs.CodeValidation, "backup manifest database entry is invalid")
 	}
-	if m.Config != nil && (m.Config.Name != cfgEntryName || !sha64Re.MatchString(m.Config.SHA256)) {
+	if m.Config != nil && (m.Config.Name != cfgEntryName || m.Config.SizeBytes <= 0 || !sha64Re.MatchString(m.Config.SHA256)) {
 		return errs.New(errs.CodeValidation, "backup manifest config entry is invalid")
 	}
 	for _, a := range m.Attachments {
-		if !sha64Re.MatchString(a.SHA256) || a.SizeBytes <= 0 {
+		name := fmt.Sprintf("files/tickets/%d/%s", a.TicketID, a.StorageName)
+		if !attachmentEntryRe.MatchString(name) || !sha64Re.MatchString(a.SHA256) || a.SizeBytes <= 0 {
 			return errs.New(errs.CodeValidation, "backup manifest attachment entry is invalid")
 		}
 	}
 	return nil
 }
 
-// expectedEntries maps every archive entry name (besides the manifest) to its
-// manifest hash. Anything outside this map is rejected.
-func expectedEntries(m *Manifest) map[string]string {
-	out := map[string]string{m.Database.Name: m.Database.SHA256}
+// expectedEntries maps each payload name to its declared size and hash.
+func expectedEntries(m *Manifest) map[string]FileEntry {
+	out := map[string]FileEntry{m.Database.Name: m.Database}
 	if m.Config != nil {
-		out[m.Config.Name] = m.Config.SHA256
+		out[m.Config.Name] = *m.Config
 	}
 	for _, a := range m.Attachments {
 		name := fmt.Sprintf("files/tickets/%d/%s", a.TicketID, a.StorageName)
-		out[name] = a.SHA256
+		out[name] = FileEntry{Name: name, SizeBytes: a.SizeBytes, SHA256: a.SHA256}
 	}
 	return out
 }
 
-// verifyEntries streams all payload entries and checks hashes (Verify).
-func (r *archiveReader) verifyEntries(m *Manifest) error {
+// verifyEntries hashes every payload, staging DB/config or all files for restore.
+func (r *archiveReader) verifyEntries(m *Manifest, staging string, extract bool) error {
 	expect := expectedEntries(m)
 	seen := map[string]bool{}
 	for {
@@ -387,6 +349,9 @@ func (r *archiveReader) verifyEntries(m *Manifest) error {
 		if err != nil {
 			return errs.Wrap(errs.CodeValidation, err, "archive is corrupt or truncated")
 		}
+		if hdr.Typeflag != tar.TypeReg {
+			return errs.New(errs.CodeValidation, "archive entry %q is not a regular file", hdr.Name)
+		}
 		want, ok := expect[hdr.Name]
 		if !ok {
 			return errs.New(errs.CodeValidation, "unexpected archive entry %q", hdr.Name)
@@ -395,17 +360,45 @@ func (r *archiveReader) verifyEntries(m *Manifest) error {
 			return errs.New(errs.CodeValidation, "duplicate archive entry %q", hdr.Name)
 		}
 		seen[hdr.Name] = true
+		if hdr.Size != want.SizeBytes {
+			return errs.New(errs.CodeValidation, "archive entry %q size %d does not match the manifest (%d)", hdr.Name, hdr.Size, want.SizeBytes)
+		}
+		var dst *os.File
+		if extract || hdr.Name == dbEntryName || hdr.Name == cfgEntryName {
+			path := filepath.Join(staging, filepath.FromSlash(hdr.Name))
+			if !strings.HasPrefix(path, staging+string(filepath.Separator)) {
+				return errs.New(errs.CodeValidation, "archive entry %q escapes the restore root", hdr.Name)
+			}
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+				return errs.Wrap(errs.CodeInternal, err, "cannot create verification directory")
+			}
+			dst, err = os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+			if err != nil {
+				return errs.Wrap(errs.CodeInternal, err, "cannot write verification file")
+			}
+		}
 		h := sha256.New()
-		n, err := io.Copy(h, io.LimitReader(r.tr, hdr.Size+1))
-		if err != nil {
-			return errs.Wrap(errs.CodeValidation, err, "archive is corrupt or truncated")
+		var sink io.Writer = h
+		if dst != nil {
+			sink = io.MultiWriter(h, dst)
+		}
+		n, copyErr := io.Copy(sink, r.tr)
+		var closeErr error
+		if dst != nil {
+			closeErr = dst.Close()
+		}
+		if copyErr != nil {
+			return errs.Wrap(errs.CodeValidation, copyErr, "archive is corrupt or truncated")
+		}
+		if closeErr != nil {
+			return errs.Wrap(errs.CodeInternal, closeErr, "cannot close verification file")
 		}
 		if n != hdr.Size {
 			return errs.New(errs.CodeValidation, "archive entry %q is truncated", hdr.Name)
 		}
-		if got := hex.EncodeToString(h.Sum(nil)); got != want {
+		if got := hex.EncodeToString(h.Sum(nil)); got != want.SHA256 {
 			return errs.New(errs.CodeValidation,
-				"archive entry %q fails integrity verification (manifest %s, got %s)", hdr.Name, want, got)
+				"archive entry %q fails integrity verification (manifest %s, got %s)", hdr.Name, want.SHA256, got)
 		}
 	}
 	for name := range expect {
@@ -413,27 +406,9 @@ func (r *archiveReader) verifyEntries(m *Manifest) error {
 			return errs.New(errs.CodeValidation, "archive entry %q is missing", name)
 		}
 	}
+	// tar EOF can precede the gzip trailer; Close alone does not check its CRC.
+	if _, err := io.Copy(io.Discard, r.gz); err != nil {
+		return errs.Wrap(errs.CodeValidation, err, "archive gzip stream is corrupt or truncated")
+	}
 	return nil
-}
-
-// writeVerified extracts one entry to dst while hashing it.
-func writeVerified(dst string, tr *tar.Reader, declaredSize int64) (string, int64, error) {
-	f, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return "", 0, errs.Wrap(errs.CodeInternal, err, "cannot create restore file")
-	}
-	h := sha256.New()
-	n, err := io.Copy(io.MultiWriter(f, h), io.LimitReader(tr, declaredSize+1))
-	if err != nil {
-		_ = f.Close()
-		return "", 0, errs.Wrap(errs.CodeValidation, err, "archive is corrupt or truncated")
-	}
-	if n != declaredSize {
-		_ = f.Close()
-		return "", 0, errs.New(errs.CodeValidation, "archive entry is truncated")
-	}
-	if err := f.Close(); err != nil {
-		return "", 0, errs.Wrap(errs.CodeInternal, err, "cannot close restore file")
-	}
-	return hex.EncodeToString(h.Sum(nil)), n, nil
 }

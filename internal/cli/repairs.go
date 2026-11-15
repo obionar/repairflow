@@ -231,6 +231,19 @@ func runRepair(ctx context.Context, opts options, args []string, getenv Env) (an
 		}
 		actor := resolveActor(p, getenv)
 		return svc.RestoreRepairEntry(ctx, actor, id)
+	case "label":
+		p, err := parseArgs(rest, []string{"actor"}, nil)
+		if err != nil {
+			return nil, err
+		}
+		if err := requirePositional(p, 1, "repairflow repair label ID"); err != nil {
+			return nil, err
+		}
+		id, err := parseID(p.positional[0], "repair")
+		if err != nil {
+			return nil, err
+		}
+		return svc.PrintRepairLabel(ctx, resolveActor(p, getenv), id)
 	case "archive", "unarchive":
 		p, err := parseArgs(rest, []string{"actor"}, nil)
 		if err != nil {

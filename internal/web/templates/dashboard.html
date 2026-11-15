@@ -20,7 +20,7 @@
 </section>
 
 <section class="panel table-window dashboard-panel">
-  <div class="section-heading"><h2>{{$.Tr "dashboard.ready"}}</h2><div class="section-links"><span>{{$.Pl "dashboard.waiting" .Data.Queues.AwaitingPickup}}</span></div></div>
+  <div class="section-heading"><h2>{{$.Tr "dashboard.ready"}}</h2><div class="section-links"><span>{{$.Pl "dashboard.waiting" .Data.Queues.AwaitingPickup}}</span> · <a href="/repairs">{{$.Tr "dashboard.view_all_repairs"}}</a></div></div>
   {{if .Data.Queues.ReadyForCollection}}
   <div class="table-wrap" tabindex="0" role="region" aria-label="{{$.Tr "dashboard.awaiting_pickup"}}">
     <table id="collection-table">

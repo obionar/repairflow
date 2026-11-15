@@ -102,47 +102,49 @@ func (s *Service) Purge(ctx context.Context, actor string, id int64, confirm boo
 	if err := s.recoverPendingDeletesLocked(ctx, store); err != nil {
 		return Attachment{}, err
 	}
-	a, err := s.GetAttachment(ctx, id)
-	if err != nil {
-		return Attachment{}, err
-	}
-	if a.State != "detached" {
-		return Attachment{}, errs.New(errs.CodeConflict, "only detached attachments can be purged (attachment %d is %s)", id, a.State)
-	}
-	if a.PurgeAfter == "" {
-		return Attachment{}, errs.New(errs.CodeInternal, "attachment %d has no purge_after timestamp", id)
-	}
-	purgeAfter, err := time.Parse(time.RFC3339, a.PurgeAfter)
-	if err != nil {
-		return Attachment{}, errs.Wrap(errs.CodeInternal, err,
-			"attachment %d has invalid purge_after metadata; refusing purge", id)
-	}
-	if s.now().Before(purgeAfter) {
-		return Attachment{}, errs.New(errs.CodeConflict,
-			"attachment %d is still within the %s retention grace (purge allowed after %s)", id, PurgeGrace, a.PurgeAfter)
-	}
-
 	ts := s.timestamp()
 	var pending files.PendingDelete
 	staged := false
+	var a Attachment
 	err = s.InTx(ctx, func(ctx context.Context) error {
+		// Read and validate inside the write transaction. A restore/re-detach
+		// between an earlier grace check and this transaction must not let an
+		// operation destroy bytes under a newly renewed retention deadline.
 		var repairID int64
-		var storageName string
+		var storageName, state, purgeAfter string
 		if err := s.q(ctx).QueryRowContext(ctx,
-			`SELECT repair_id, storage_name FROM attachments WHERE id = ? AND state = 'detached'`, id).Scan(&repairID, &storageName); err != nil {
+			`SELECT repair_id, storage_name, state, purge_after, sha256 FROM attachments WHERE id = ?`, id).
+			Scan(&repairID, &storageName, &state, &purgeAfter, &a.SHA256); err != nil {
 			if isNoRows(err) {
-				return errs.New(errs.CodeConflict, "attachment %d changed before purge; retry after reading it again", id)
+				return notFound("attachment", id)
 			}
 			return errs.Wrap(errs.CodeInternal, err, "cannot read attachment for purge")
 		}
-		var err error
+		a.ID, a.RepairID, a.storageName = id, repairID, storageName
+		if state != "detached" {
+			return errs.New(errs.CodeConflict, "only detached attachments can be purged (attachment %d is %s)", id, state)
+		}
+		if purgeAfter == "" {
+			return errs.New(errs.CodeInternal, "attachment %d has no purge_after timestamp", id)
+		}
+		deadline, err := time.Parse(time.RFC3339, purgeAfter)
+		if err != nil {
+			return errs.Wrap(errs.CodeInternal, err,
+				"attachment %d has invalid purge_after metadata; refusing purge", id)
+		}
+		if s.now().Before(deadline) {
+			return errs.New(errs.CodeConflict,
+				"attachment %d is still within the %s retention grace (purge allowed after %s)", id, PurgeGrace, purgeAfter)
+		}
+
 		pending, err = store.StageDelete(repairID, storageName)
 		if err != nil {
 			return err
 		}
 		staged = true
 		res, err := s.q(ctx).ExecContext(ctx,
-			`UPDATE attachments SET state='purged', storage_name='', updated_at=? WHERE id=? AND state='detached'`, ts, id)
+			`UPDATE attachments SET state='purged', storage_name='', updated_at=? WHERE id=? AND state='detached' AND purge_after=?`,
+			ts, id, purgeAfter)
 		if err != nil {
 			return errs.Wrap(errs.CodeInternal, err, "cannot mark attachment purged")
 		}
@@ -155,7 +157,7 @@ func (s *Service) Purge(ctx context.Context, actor string, id int64, confirm boo
 		}
 		_, err = s.q(ctx).ExecContext(ctx,
 			`INSERT INTO repair_activity(repair_id, actor, action, detail, created_at) VALUES(?,?,?,?,?)`,
-			a.RepairID, actor, "attachment_purge", detailJSON(map[string]any{"attachment_id": id, "sha256": a.SHA256}), ts)
+			repairID, actor, "attachment_purge", detailJSON(map[string]any{"attachment_id": id, "sha256": a.SHA256}), ts)
 		return err
 	})
 	if err != nil {

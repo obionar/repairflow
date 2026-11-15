@@ -1,6 +1,7 @@
 package service_test
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -193,6 +194,35 @@ func TestRemoveRefusesForeignUnit(t *testing.T) {
 	}
 	if _, statErr := os.Stat(unitPath); statErr != nil {
 		t.Fatal("refused removal must leave the file")
+	}
+}
+
+// Installation must not replace a unit this tool did not write.
+func TestInstallRefusesUnmanagedUnit(t *testing.T) {
+	unitDir := filepath.Join(t.TempDir(), "units")
+	if err := os.MkdirAll(unitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	unitPath := filepath.Join(unitDir, service.UnitName)
+	body := []byte("[Unit]\nDescription=operator-maintained\n")
+	if err := os.WriteFile(unitPath, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := service.Install(service.Options{
+		BinaryPath: "/opt/repairflow/repairflow",
+		Home:       "/home/u/.repairflow",
+		Init:       service.InitSystemd,
+		UnitDir:    unitDir,
+	})
+	if err == nil || errs.CodeOf(err) != errs.CodeConflict {
+		t.Fatalf("unmanaged unit must be refused: %v", err)
+	}
+	after, readErr := os.ReadFile(unitPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !bytes.Equal(after, body) {
+		t.Fatalf("refused install changed the unit:\n%s", after)
 	}
 }
 

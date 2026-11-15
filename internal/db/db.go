@@ -105,13 +105,21 @@ func Open(ctx context.Context, path string) (*sql.DB, error) {
 }
 
 // CurrentVersion returns the highest applied migration version (0 = fresh).
+// The table is checked in sqlite_master rather than inferred from a driver
+// error message, which is wording we do not control.
 func CurrentVersion(ctx context.Context, handle *sql.DB) (int, error) {
+	var present int
+	if err := handle.QueryRowContext(ctx,
+		`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'`).
+		Scan(&present); err != nil {
+		return 0, errs.Wrap(errs.CodeInternal, err, "cannot inspect schema version table")
+	}
+	if present == 0 {
+		return 0, nil
+	}
 	var version sql.NullInt64
 	err := handle.QueryRowContext(ctx, "SELECT max(version) FROM schema_migrations").Scan(&version)
 	if err != nil {
-		if strings.Contains(err.Error(), "no such table") {
-			return 0, nil
-		}
 		return 0, errs.Wrap(errs.CodeInternal, err, "cannot read schema version")
 	}
 	if !version.Valid {

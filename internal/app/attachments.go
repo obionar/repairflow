@@ -200,12 +200,15 @@ func (s *Service) ListRepairAttachments(ctx context.Context, repairID int64, inc
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	links, err := s.repairAttachmentEntryIDs(ctx, repairID)
+	if err != nil {
+		return nil, err
+	}
 	for i := range out {
-		links, err := s.attachmentEntryIDs(ctx, out[i].ID)
-		if err != nil {
-			return nil, err
+		out[i].EntryIDs = links[out[i].ID]
+		if out[i].EntryIDs == nil {
+			out[i].EntryIDs = []int64{}
 		}
-		out[i].EntryIDs = links
 		setPreview(&out[i])
 	}
 	return out, nil

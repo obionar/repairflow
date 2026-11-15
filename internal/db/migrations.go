@@ -19,6 +19,7 @@ var migrations = []migration{
 	{7, "contact_device_parity", schemaV7},
 	{8, "drop_legacy_ticket_id", schemaV8},
 	{9, "repair_customer_optional", schemaV9},
+	{10, "label_printer", schemaV10},
 }
 
 // LatestVersion returns the highest known migration version.
@@ -28,6 +29,19 @@ func LatestVersion() int {
 	}
 	return migrations[len(migrations)-1].version
 }
+
+// schemaV10 stores the one workspace-wide label-printer choice. An empty
+// driver means label printing is switched off; printer-specific settings
+// (density, label size, printer name) stay in the printer driver's own config.
+const schemaV10 = `
+CREATE TABLE label_printer (
+	id INTEGER PRIMARY KEY CHECK (id = 1),
+	driver TEXT NOT NULL CHECK (driver IN ('', 'p15')),
+	updated_at TEXT NOT NULL
+) STRICT;
+
+INSERT INTO label_printer(id, driver, updated_at) VALUES (1, '', '');
+`
 
 const schemaV8 = `
 DROP INDEX idx_repairs_legacy_id;

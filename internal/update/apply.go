@@ -32,7 +32,7 @@ type ApplyOptions struct {
 	ManifestBytes  []byte
 	Signature      []byte
 	PublicKey      ed25519.PublicKey
-	CurrentVersion string
+	CurrentVersion string // retained for callers; Apply reads the installed version under the lock
 	HealthTimeout  time.Duration
 
 	// Test-only seams. Unexported so external callers cannot install hooks;
@@ -69,14 +69,14 @@ func Apply(ctx context.Context, opts ApplyOptions) (*ApplyResult, error) {
 		return nil, err
 	}
 
-	// Version policy: no same-version re-apply, no downgrades.
-	switch cmp := CompareVersions(m.Version, opts.CurrentVersion); {
-	case cmp == 0:
-		return nil, errs.New(errs.CodeConflict, "version %s is already installed", m.Version)
-	case cmp < 0:
-		return nil, errs.New(errs.CodeValidation,
-			"refusing downgrade %s -> %s; recovery uses the preserved previous binary", opts.CurrentVersion, m.Version)
+	// One updater per target at a time. The lock covers version checks,
+	// staging, publication, health checking and rollback, so two concurrent
+	// invocations cannot invalidate each other's success or preserved binary.
+	unlock, err := lockInstallTarget(opts.TargetPath)
+	if err != nil {
+		return nil, err
 	}
+	defer unlock()
 
 	// The replacement protocol preserves one previous binary by renaming the
 	// target. Refuse a symlink/device here so that contract is not silently
@@ -87,6 +87,27 @@ func Apply(ctx context.Context, opts ApplyOptions) (*ApplyResult, error) {
 	}
 	if !targetInfo.Mode().IsRegular() {
 		return nil, errs.New(errs.CodeValidation, "target %q is not a regular file", opts.TargetPath)
+	}
+
+	installed, _, _, err := openArtifactForExec(opts.TargetPath, -1)
+	if err != nil {
+		return nil, err
+	}
+	currentVersion, versionErr := versionFromFD(ctx, installed, opts.HealthTimeout)
+	closeErr := installed.Close()
+	if versionErr != nil {
+		return nil, errs.Wrap(errs.CodeValidation, versionErr, "cannot identify installed binary; refusing update")
+	}
+	if closeErr != nil {
+		return nil, errs.Wrap(errs.CodeInternal, closeErr, "cannot close installed binary")
+	}
+	// A waiting updater may have started before another version was installed.
+	switch cmp := CompareVersions(m.Version, currentVersion); {
+	case cmp == 0:
+		return nil, errs.New(errs.CodeConflict, "version %s is already installed", m.Version)
+	case cmp < 0:
+		return nil, errs.New(errs.CodeValidation,
+			"refusing downgrade %s -> %s; recovery uses the preserved previous binary", currentVersion, m.Version)
 	}
 
 	staging := opts.TargetPath + ".new"
@@ -214,7 +235,7 @@ func Apply(ctx context.Context, opts ApplyOptions) (*ApplyResult, error) {
 	}
 
 	return &ApplyResult{
-		FromVersion: opts.CurrentVersion, ToVersion: m.Version,
+		FromVersion: currentVersion, ToVersion: m.Version,
 		TargetPath: opts.TargetPath, BackupPath: backup,
 		RestartNote: "binary replaced on disk; restart the service/process to run the new version",
 	}, nil
@@ -357,13 +378,25 @@ func syncDir(dir string) error {
 // is fd 3 in the child, so /proc/self/fd/3 resolves to the already-open inode
 // rather than re-opening a replaceable pathname.
 func healthCheckFD(ctx context.Context, verified *os.File, wantVersion string, timeout time.Duration) error {
+	version, err := versionFromFD(ctx, verified, timeout)
+	if err != nil {
+		return err
+	}
+	if version != wantVersion {
+		return errs.New(errs.CodeInternal,
+			"health check reports version %q, expected %q", version, wantVersion)
+	}
+	return nil
+}
+
+func versionFromFD(ctx context.Context, verified *os.File, timeout time.Duration) (string, error) {
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(cctx, "/proc/self/fd/3", "version", "--json")
 	cmd.ExtraFiles = []*os.File{verified}
 	out, err := cmd.Output()
 	if err != nil {
-		return errs.Wrap(errs.CodeInternal, err, "health check command failed")
+		return "", errs.Wrap(errs.CodeInternal, err, "version check command failed")
 	}
 	var envelope struct {
 		OK   bool `json:"ok"`
@@ -371,14 +404,10 @@ func healthCheckFD(ctx context.Context, verified *os.File, wantVersion string, t
 			Version string `json:"version"`
 		} `json:"data"`
 	}
-	if err := json.Unmarshal(out, &envelope); err != nil || !envelope.OK {
-		return errs.New(errs.CodeInternal, "health check produced unreadable output")
+	if err := json.Unmarshal(out, &envelope); err != nil || !envelope.OK || envelope.Data.Version == "" {
+		return "", errs.New(errs.CodeInternal, "version check produced unreadable output")
 	}
-	if envelope.Data.Version != wantVersion {
-		return errs.New(errs.CodeInternal,
-			"health check reports version %q, expected %q", envelope.Data.Version, wantVersion)
-	}
-	return nil
+	return envelope.Data.Version, nil
 }
 
 // runtimeGOOS/runtimeGOARCH are indirected for testability (tests simulate

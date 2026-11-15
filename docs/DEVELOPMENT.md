@@ -10,9 +10,9 @@ ownership and the definition of done. [Architecture](ARCHITECTURE.md) explains d
 ## Prerequisites
 
 - Go 1.27 and `make`.
-- `go-licenses` v1.6.0 for dependency and notice verification.
+- `go-licenses` v1.6.0 for the compiled-dependency inventory.
 - Chromium for browser end-to-end tests.
-- Python 3 for the optional CLI smoke scripts.
+- Python 3 for the CLI smoke scripts; the full `verify-all` gate runs them.
 
 There is no CI or GitHub Actions gate. Local verification is required before submitting a change.
 
@@ -22,6 +22,13 @@ There is no CI or GitHub Actions gate. Local verification is required before sub
 make build
 ./scripts/run-demo.sh
 ```
+
+For a persistent contributor workspace, run `./demo/dev.sh`; it seeds
+`demo/workspace/` once and keeps it between runs. If no binary exists, the
+demo launchers build from source when possible or download the matching Linux
+release into `demo/bin/` with checksum verification. `./demo/reset.sh` restores a
+pristine synthetic workspace. No database or media export is committed; the
+dataset lives in `internal/seed`.
 
 The demo launcher builds a temporary synthetic workspace, starts the web interface and removes the
 workspace on exit. For manual CLI work, always choose a disposable workspace explicitly:
@@ -72,10 +79,14 @@ Visual changes also require real browser review at mobile and desktop widths, ke
 no-JavaScript workflows, and an accessibility check on the affected pages. A template assertion or
 HTTP 200 response alone does not verify the UI.
 
+For an isolated evaluation on workshop hardware, follow [Workshop bench testing](BENCH-TEST.md).
+Keep the bench executable and synthetic workspace separate from installed services and real records.
+
 ## Change ownership
 
-- `internal/app` owns business rules, transactions, revisions, authentication and audit writes.
-- `internal/db` owns SQLite setup, schema migrations and integrity checks.
+- `internal/app` owns business rules, transactions, revisions, authentication and audit writes,
+  including domain SQL.
+- `internal/db` owns the SQLite connection, pragmas, schema migrations and integrity checks.
 - `internal/files` owns attachment paths, original bytes and recoverable deletion.
 - `internal/cli` and `internal/web` are adapters: parse input, call the app layer and render output.
 - `internal/backup` and `internal/update` own archive and binary-replacement formats.
@@ -100,7 +111,7 @@ Run `make symbols` after declaration changes to generate the ignored `dist/SYMBO
 generated symbols, binaries, release directories, databases, attachments, backups, secrets or local
 machine details.
 
-## License inventory and notices
+## License inventory
 
 RepairFlow is AGPL-3.0-only. Install the pinned license tool once:
 
@@ -108,7 +119,7 @@ RepairFlow is AGPL-3.0-only. Install the pinned license tool once:
 go install github.com/google/go-licenses@v1.6.0
 ```
 
-Then verify the compiled-dependency inventory, bundled notices and first-party assets:
+Then verify the compiled-dependency inventory and first-party assets:
 
 ```bash
 make license-check
@@ -116,11 +127,12 @@ make license-check
 
 After changing dependencies or reviewed assets, run `make license-check`. New static/media assets
 must be reviewed and recorded in `licenses/first-party-assets.txt`. Unknown or version-mismatched
-licenses and unreviewed assets fail the check; it writes no document, only reports under
+licenses and unreviewed assets fail the check; it writes no notice document, only reports under
 `dist/licenses/`. Release archives include `LICENSE`, the signed manifest, the binary and
 `update-github.sh`; `SHA256SUMS` covers the platform archives. The release script refuses a failed
 inventory. The browser-test-only module is reported separately under `dist/licenses/` and is not
-bundled with the application.
+bundled with the application. Preserve the complete dependency license material required by the
+upstream licenses; an owner packaging decision is not a substitute for that obligation.
 
 ## Debugging
 

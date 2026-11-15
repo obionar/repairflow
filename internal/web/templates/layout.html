@@ -22,7 +22,7 @@
 </body>
 </html>{{end}}
 
-{{define "flash"}}{{if .Error}}<p id="error" class="notice notice-warn" role="alert">{{.Error}}</p>{{end}}{{end}}
+{{define "flash"}}{{if .Error}}<p id="error" class="notice notice-warn" role="alert">{{.Error}}</p>{{end}}{{if .Notice}}<p id="notice" class="notice notice-ok" role="status">{{.Notice}}</p>{{end}}{{end}}
 
 {{define "navigation"}}
 <header class="site-header">

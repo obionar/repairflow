@@ -67,19 +67,25 @@
 </details>
 
 <section class="panel table-window">
-  <div class="section-heading"><h2>{{$.Tr "customer.repairs_heading"}}</h2></div>
+  <div class="section-heading"><h2>{{$.Tr "customer.repairs_heading"}}</h2><span class="muted">{{.Data.Repairs.Total}}</span></div>
   {{if .Data.Repairs.Items}}
   <div class="table-wrap" tabindex="0" role="region" aria-label="{{$.Tr "customer.repairs_aria" .Data.Customer.Name}}">
     <table id="customer-tickets">
       <thead><tr><th scope="col">{{$.Tr "common.device"}}</th><th scope="col">{{$.Tr "common.status"}}</th><th scope="col">{{$.Tr "common.created"}}</th></tr></thead>
       <tbody>{{range .Data.Repairs.Items}}<tr>
         <td data-label="{{$.Tr "common.device"}}"><a class="record-link" href="/repairs/{{.ID}}"><span class="record-id">#{{.ID}}</span> <span class="record-title">{{.Device}}</span></a><span class="issue-line">{{.Issue}}</span></td>
-        <td data-label="{{$.Tr "common.status"}}"><span class="stage {{.Stage}}">{{$.Tr (printf "stage.%s" .Stage)}}</span></td>
+        <td data-label="{{$.Tr "common.status"}}"><span class="stage {{.Stage}}">{{$.Tr (printf "stage.%s" .Stage)}}</span>{{if .ArchivedAt}} <span class="stage">{{$.Tr "common.archived"}}</span>{{end}}</td>
         <td data-label="{{$.Tr "common.created"}}"><time datetime="{{.CreatedAt}}">{{date .CreatedAt}}</time></td>
       </tr>{{end}}</tbody>
     </table>
   </div>
   {{else}}<div class="window-content"><p class="muted">{{$.Tr "customer.no_repairs"}}</p></div>{{end}}
+  {{if or .Data.Prev .Data.Next}}
+  <nav class="pagination" aria-label="{{$.Tr "customers.pages"}}">
+    {{if .Data.Prev}}<a href="/customers/{{.Data.Customer.ID}}?page={{.Data.Prev}}">{{$.Tr "common.previous"}}</a>{{end}}
+    {{if .Data.Next}}<a href="/customers/{{.Data.Customer.ID}}?page={{.Data.Next}}">{{$.Tr "common.next"}}</a>{{end}}
+  </nav>
+  {{end}}
 </section>
 
 <details class="panel fold-panel" id="customer-history">

@@ -7,6 +7,7 @@
   <div class="panel-body">
   <form id="ticket-form" class="record-form" method="post" action="/repairs/new">
     <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <input type="hidden" name="idempotency_key" value="{{.Data.Form.IDKey}}">
     <div class="fields">
       <div class="field"><label for="customer_name">{{$.Tr "common.customer"}}</label>
         <input id="customer_name" name="customer_name" list="customer-options" value="{{.Data.Form.CustomerName}}" autocomplete="off" data-customer-autocomplete placeholder="{{$.Tr "repair_new.customer_placeholder"}}">
@@ -19,7 +20,6 @@
       <div class="field"><label for="model">{{$.Tr "repair_new.model"}}</label><input id="model" name="model" value="{{.Data.Form.Model}}" maxlength="200" placeholder="{{$.Tr "repair_new.model_placeholder"}}"></div>
       <div class="field"><label for="serial">{{$.Tr "repair_new.serial"}}</label><input id="serial" name="serial" value="{{.Data.Form.Serial}}" maxlength="200"></div>
       <div class="field"><label for="issue">{{$.Tr "repair_new.issue"}}</label><textarea id="issue" name="issue" rows="3" required maxlength="5000">{{.Data.Form.Issue}}</textarea></div>
-      <div class="field"><label for="notes">{{$.Tr "common.notes"}}</label><textarea id="notes" name="notes" rows="3" maxlength="5000">{{.Data.Form.Notes}}</textarea></div>
     </div>
     <div class="form-actions">
       <button class="primary" type="submit" id="ticket-submit">{{$.Tr "repair_new.create"}}</button>

@@ -499,6 +499,8 @@ td:first-child a.record-link { text-decoration: none; }
 .stage-form .field { max-width: none; margin-bottom: 12px; }
 .stage-form form { margin: 0; }
 .repair-device form { margin-bottom: 0; }
+.label-actions { margin: 8px 0 16px; }
+.label-actions form, .label-actions p { margin: 0; }
 .repair-device .field { margin-bottom: 12px; }
 .stage {
   display: inline-block;
@@ -687,7 +689,7 @@ td:first-child a.record-link { text-decoration: none; }
   .form-actions > * { flex: 1 1 auto; }
   .search-panel { padding: 16px; gap: 14px; }
   .search-panel > .field { flex: 1 0 100%; max-width: none; }
-  .search-panel > button { width: 100%; margin: 0; }
+  .search-panel > button:not(.sr-only) { width: 100%; margin: 0; }
   .list-actions > .button { width: 100%; }
   .table-wrap { overflow: visible; }
   table, thead, tbody, tr, th, td { display: block; }

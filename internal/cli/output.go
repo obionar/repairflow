@@ -122,7 +122,11 @@ repaired, no_repair; terminal stages need --reopen to return to in_progress):
   repair entry-edit ENTRY_ID [--kind K] [--body B]
   repair entry-delete ENTRY_ID | repair entry-restore ENTRY_ID
   repair pickup ID --at RFC3339|YYYY-MM-DD --by NAME [--notes N]
+  repair label ID                       # print the intake sticker
   repair archive ID | repair unarchive ID
+
+Label printer (Marklife P15 through the local p15 daemon):
+  printer show | printer set p15|none | printer test
 
 Parts and estimates (integer cents, milli-quantities, immutable estimates):
   repair part-add TICKET_ID --description D --qty Q [--unit U] [--cost C]

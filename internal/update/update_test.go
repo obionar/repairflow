@@ -107,6 +107,64 @@ func TestApplyHappyPath(t *testing.T) {
 	}
 }
 
+func TestApplyUsesInstalledVersion(t *testing.T) {
+	for _, tc := range []struct {
+		name, installed, candidate string
+		wantCode                   errs.Code
+	}{
+		{"stale downgrade", "1.2.0", "1.1.0", errs.CodeValidation},
+		{"stale same version", "1.1.0", "1.1.0", errs.CodeConflict},
+		{"accurate receipt", "1.1.0", "1.2.0", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			target := writeScript(t, dir, "repairflow", tc.installed)
+			before, err := os.ReadFile(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := makeRelease(t, dir, tc.candidate, runtime_GOOS, runtime_GOARCH, tc.candidate)
+			result, err := update.Apply(context.Background(), applyOpts(r, target, "1.0.0"))
+			if errs.CodeOf(err) != tc.wantCode {
+				t.Fatalf("stale caller version: got %v, want code %q", err, tc.wantCode)
+			}
+			if tc.wantCode == "" {
+				if result.FromVersion != tc.installed {
+					t.Fatalf("receipt uses stale version: %+v", result)
+				}
+				return
+			}
+			after, err := os.ReadFile(target)
+			if err != nil || !bytes.Equal(before, after) {
+				t.Fatalf("refused update changed target: %v", err)
+			}
+			for _, suffix := range []string{".new", ".prev"} {
+				if _, err := os.Stat(target + suffix); !os.IsNotExist(err) {
+					t.Fatalf("refused update created %s: %v", suffix, err)
+				}
+			}
+		})
+	}
+}
+
+func TestApplyRefusesUnidentifiableInstalledBinary(t *testing.T) {
+	for _, body := range []string{"#!/bin/sh\nexit 1\n", "#!/bin/sh\necho invalid\n", "#!/bin/sh\necho '{\"ok\":true,\"data\":{}}'\n"} {
+		dir := t.TempDir()
+		target := filepath.Join(dir, "repairflow")
+		if err := os.WriteFile(target, []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		r := makeRelease(t, dir, "1.1.0", runtime_GOOS, runtime_GOARCH, "1.1.0")
+		if _, err := update.Apply(context.Background(), applyOpts(r, target, "1.0.0")); errs.CodeOf(err) != errs.CodeValidation {
+			t.Fatalf("unidentified installed binary: %v", err)
+		}
+		got, err := os.ReadFile(target)
+		if err != nil || string(got) != body {
+			t.Fatalf("failed preflight changed target: %q %v", got, err)
+		}
+	}
+}
+
 // ---- negative matrix ------------------------------------------------------
 
 func TestApplyRefusals(t *testing.T) {

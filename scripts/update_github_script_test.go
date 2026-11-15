@@ -322,6 +322,96 @@ func TestGitHubUpdateScriptApplyRefusalPreservesBinary(t *testing.T) {
 	}
 }
 
+// No privilege is used: fake doas/sudo record whether the script would escalate.
+func TestGitHubUpdatePrivilegeBoundary(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("requires unprivileged directory writability checks")
+	}
+	artifact := []byte("candidate fixture\n")
+	sum := sha256.Sum256(artifact)
+	metadata := fmt.Sprintf(`{"ok":true,"data":{"artifact":{"sha256":"%x","size_bytes":%d}}}`, sum, len(artifact))
+	archive := makeUpdateArchive(t, map[string][]byte{
+		"repairflow": artifact, "manifest.json": []byte("fixture"), "manifest.sig": []byte("fixture"),
+	}, nil)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(archive)
+	}))
+	defer server.Close()
+	for _, tc := range []struct {
+		name, owner, mode string
+		symlink           bool
+		allow             bool
+	}{
+		{"user owned", "1000", "755", false, false},
+		{"group writable", "0", "775", false, false},
+		{"world writable", "0", "777", false, false},
+		{"unsafe ancestor", "0", "755", false, false},
+		{"symlink", "0", "755", true, false},
+		{"trusted metadata", "0", "755", false, true},
+		{"stat failure", "error", "755", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			fakebin := filepath.Join(dir, "tools")
+			installDir := filepath.Join(dir, "unsafe-parent", "bin")
+			if err := os.MkdirAll(installDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(fakebin, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			marker := filepath.Join(dir, "escalated")
+			for _, name := range []string{"doas", "sudo"} {
+				if err := os.WriteFile(filepath.Join(fakebin, name), []byte("#!/bin/sh\ntouch '"+marker+"'\n"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// Simulate root-owned files without requiring chown or a real root host.
+			stat := "#!/bin/sh\ncase \"$2\" in\n%u) echo " + tc.owner + ";;\n%a) echo " + tc.mode + ";;\nesac\n"
+			if tc.name == "unsafe ancestor" {
+				stat = "#!/bin/sh\ncase \"$2:$4\" in\n%u:*) echo 0;;\n%a:*/unsafe-parent) echo 777;;\n%a:*) echo 755;;\nesac\n"
+			}
+			if tc.owner == "error" {
+				stat = "#!/bin/sh\nexit 1\n"
+			}
+			if err := os.WriteFile(filepath.Join(fakebin, "stat"), []byte(stat), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			installed := filepath.Join(installDir, "repairflow")
+			if err := os.WriteFile(installed, []byte("#!/bin/sh\nprintf '%s\\n' '"+metadata+"'\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if tc.symlink {
+				if err := os.Rename(installed, installed+"-real"); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(installed+"-real", installed); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.Chmod(installDir, 0o555); err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if err := os.Chmod(installDir, 0o755); err != nil {
+					t.Error(err)
+				}
+			}()
+			cmd := exec.Command("sh", "update-github.sh", "--tag", "0.2.0-rc1", "--binary", installed, "--apply")
+			cmd.Env = append(cleanEnvironment(), "PATH="+fakebin+":/usr/bin:/bin", "REPAIRFLOW_UPDATE_BASE_URL="+server.URL, "TMPDIR="+t.TempDir())
+			out, err := cmd.CombinedOutput()
+			_, markerErr := os.Stat(marker)
+			if tc.allow {
+				if err != nil || markerErr != nil {
+					t.Fatalf("trusted metadata must allow fake escalation: %v %v\n%s", err, markerErr, out)
+				}
+			} else if err == nil || !os.IsNotExist(markerErr) {
+				t.Fatalf("unsafe executable escalated: %v %v\n%s", err, markerErr, out)
+			}
+		})
+	}
+}
+
 func cleanEnvironment() []string {
 	env := make([]string, 0, len(os.Environ()))
 	for _, entry := range os.Environ() {

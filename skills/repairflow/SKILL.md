@@ -66,8 +66,9 @@ that refusal.
 - `internal/backup`, `internal/update` — verified archives and signed offline replacement.
 - `internal/workspace`, `internal/service`, `internal/seed` — lifecycle, init systems and demo data.
 
-Business logic never belongs in handlers or CLI parsing. SQL never leaks outside `internal/db`
-except through the app layer. Add migrations; never rewrite an applied one.
+Business logic never belongs in handlers or CLI parsing. Domain SQL and transactions belong in
+`internal/app`; `internal/db` owns the SQLite connection, schema and integrity checks. Add
+migrations; never rewrite an applied one.
 
 ## Contracts that bite
 
@@ -86,7 +87,8 @@ except through the app layer. Add migrations; never rewrite an applied one.
   confirmation and the retention period. Never delete `files/.purge/` recovery links by hand.
 - The web listener is loopback-only by default. `web.allow_insecure_lan=true` is an explicit unsafe
   testing exception and must never hold real records.
-- `make build`/`make cross` default to `0.1.0-dev`; a release must be explicitly stamped.
+- `make build`/`make cross` default to `0.2.0-dev`; a release must be explicitly stamped
+  (`0.2.0-rc1` for a candidate, `0.2.0` only after approval).
 
 ## Definition of done
 

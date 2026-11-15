@@ -9,7 +9,7 @@ import "runtime"
 
 // Build metadata. Defaults describe an un-stamped development build.
 var (
-	Version = "0.1.0-dev"
+	Version = "0.2.0-dev"
 	Commit  = "unknown"
 	Date    = "unknown"
 	// PublicKey is the hex Ed25519 release-signing key embedded at build

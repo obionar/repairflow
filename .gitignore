@@ -3,3 +3,12 @@
 *.test
 __pycache__/
 *.py[cod]
+
+# Contributor demo workspace and downloaded demo binary (generated, never committed).
+/demo/workspace/
+/demo/bin/
+
+# Private planning/evidence normally lives outside this repository.
+# These patterns are defence in depth if a local checkout adds it.
+/.internal/
+/docs-internal/

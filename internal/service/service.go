@@ -551,9 +551,9 @@ func managedService(body string) (string, bool) {
 	return "", false
 }
 
-// ensureReplaceable refuses to overwrite an existing file that a different
-// service instance wrote. An unmarked file keeps the previous behaviour: a
-// hand-written unit is replaced and Remove refuses it separately.
+// ensureReplaceable refuses to overwrite any file this tool did not write.
+// Removing an unmarked unit is already refused; replacing one is equally
+// destructive and could discard hand-maintained service settings.
 func ensureReplaceable(path, name string) error {
 	body, err := os.ReadFile(path)
 	if err != nil {
@@ -564,7 +564,11 @@ func ensureReplaceable(path, name string) error {
 			"refusing to overwrite %s: its managed-by marker cannot be read (%v)", path, err)
 	}
 	owner, managed := managedService(string(body))
-	if !managed || owner == name {
+	if !managed {
+		return errs.New(errs.CodeConflict,
+			"refusing to overwrite %s: it was not written by repairflow (managed-by marker missing); move it aside or remove it deliberately first", path)
+	}
+	if owner == name {
 		return nil
 	}
 	return ownershipConflict("overwrite", path, owner, name)
@@ -722,7 +726,7 @@ func binaryPathWarning(binaryPath string) string {
 	for _, segment := range strings.Split(clean, string(os.PathSeparator)) {
 		switch segment {
 		case "Downloads", "downloads", "Desktop":
-			return "unit pins " + clean + " inside a download/desktop folder; move the binary to a stable path such as ~/.local/bin/repairflow"
+			return "unit pins " + clean + " inside a download/desktop folder; move the binary to a stable path such as /usr/local/bin/repairflow"
 		}
 	}
 	return ""

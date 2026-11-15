@@ -1,5 +1,5 @@
-// Package backup implements portable workspace backup and restore
-// Backup and restore preserve the complete workspace and verify every file.
+// Package backup implements portable database, configuration and original
+// attachment backup and restore, verifying every archived file.
 //
 // Consistency model: the SQLite database is snapshotted with `VACUUM INTO`
 // (SQLite's supported consistent-copy mechanism — never a raw WAL file copy),
@@ -16,7 +16,7 @@
 //	config.toml                   workspace configuration (optional)
 //	files/tickets/<id>/<opaque>   original attachment bytes
 //
-// Disposable content (cache/, run/, logs/, backups/) is excluded.
+// Disposable content (cache/, run/, logs/, backups/) and locales/ overrides are excluded.
 package backup
 
 import (
@@ -46,6 +46,11 @@ import (
 
 // FormatVersion is the backup archive format version.
 const FormatVersion = 1
+
+// MaxManifestBytes bounds the manifest on both write and read. An indented
+// manifest for 22,000 attachments is already about 4 MiB; this leaves room for
+// a long workshop history without allowing an unbounded allocation.
+const MaxManifestBytes = 64 << 20
 
 // ArchiveSuffix is the conventional backup file suffix.
 const ArchiveSuffix = ".rfbak"
@@ -78,7 +83,10 @@ type Manifest struct {
 	Attachments   []AttachmentEntry `json:"attachments"`
 }
 
-var sha64Re = regexp.MustCompile(`^[a-f0-9]{64}$`)
+var (
+	sha64Re           = regexp.MustCompile(`^[a-f0-9]{64}$`)
+	attachmentEntryRe = regexp.MustCompile(`^files/tickets/[1-9][0-9]*/[a-f0-9]{32}$`)
+)
 
 const (
 	manifestName = "manifest.json"
@@ -121,24 +129,40 @@ func Create(ctx context.Context, home, destPath, actor string) (*Result, error) 
 		return nil, err
 	}
 
-	partPath := destPath + ".part"
-	if err := writeArchive(ctx, home, partPath, staging, snapshotPath, manifest); err != nil {
+	part, err := os.CreateTemp(filepath.Dir(destPath), ".repairflow-backup-*.part")
+	if err != nil {
+		return nil, errs.Wrap(errs.CodeInternal, err, "cannot create backup archive")
+	}
+	partPath := part.Name()
+	// Remove only the operation-owned temporary file. A pre-existing
+	// <destination>.part belongs to someone else and is never touched.
+	defer func() {
+		_ = part.Close()
 		_ = os.Remove(partPath)
+	}()
+	if err := writeArchive(ctx, home, part, snapshotPath, manifest); err != nil {
 		return nil, err
+	}
+	if err := part.Sync(); err != nil {
+		return nil, errs.Wrap(errs.CodeInternal, err, "cannot flush backup archive")
+	}
+	if err := part.Chmod(0o600); err != nil {
+		return nil, errs.Wrap(errs.CodeInternal, err, "cannot set backup permissions")
+	}
+	if err := part.Close(); err != nil {
+		return nil, errs.Wrap(errs.CodeInternal, err, "cannot close backup archive")
 	}
 	// Full verification pass before publishing the final name.
 	if _, err := Verify(ctx, partPath); err != nil {
-		_ = os.Remove(partPath)
 		return nil, errs.Wrap(errs.CodeInternal, err, "backup self-verification failed; no backup was published")
 	}
-	if err := os.Chmod(partPath, 0o600); err != nil {
-		_ = os.Remove(partPath)
-		return nil, errs.Wrap(errs.CodeInternal, err, "cannot set backup permissions")
+	// Publish without replacing a destination that appeared after validateDest.
+	// Linux uses an atomic no-replace rename; filesystems that do not support
+	// it fall back to a checked rename so external backup disks still work.
+	if err := publishNoReplace(partPath, destPath); err != nil {
+		return nil, err
 	}
-	if err := os.Rename(partPath, destPath); err != nil {
-		_ = os.Remove(partPath)
-		return nil, errs.Wrap(errs.CodeInternal, err, "cannot publish backup")
-	}
+	_ = os.Remove(partPath)
 
 	archiveHash, size, err := hashFile(destPath)
 	if err != nil {
@@ -243,26 +267,22 @@ func snapshotAndInventory(ctx context.Context, home, staging, actor string) (*Ma
 }
 
 // writeArchive streams the manifest, snapshot, config and verified attachment
-// bytes into a gzip tar at partPath, re-hashing every file on the way in so a
-// file changed during archiving aborts the backup.
-func writeArchive(ctx context.Context, home, partPath, staging, snapshotPath string, manifest *Manifest) error {
-	out, err := os.OpenFile(partPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return errs.Wrap(errs.CodeInternal, err, "cannot create backup archive")
-	}
+// bytes into a caller-owned gzip tar file, re-hashing every file on the way in
+// so a file changed during archiving aborts the backup. The caller is
+// responsible for syncing and closing out; this function never closes it.
+func writeArchive(ctx context.Context, home string, out *os.File, snapshotPath string, manifest *Manifest) error {
 	gz := gzip.NewWriter(out)
 	tw := tar.NewWriter(gz)
 
 	fail := func(err error) error {
 		_ = tw.Close()
 		_ = gz.Close()
-		_ = out.Close()
 		return err
 	}
 
-	manifestJSON, err := json.MarshalIndent(manifest, "", "  ")
+	manifestJSON, err := encodeManifest(manifest)
 	if err != nil {
-		return fail(errs.Wrap(errs.CodeInternal, err, "cannot encode manifest"))
+		return fail(err)
 	}
 	if err := writeEntry(tw, manifestName, manifestJSON); err != nil {
 		return fail(err)
@@ -284,19 +304,40 @@ func writeArchive(ctx context.Context, home, partPath, staging, snapshotPath str
 	}
 	if err := tw.Close(); err != nil {
 		_ = gz.Close()
-		_ = out.Close()
 		return errs.Wrap(errs.CodeInternal, err, "cannot finish backup archive")
 	}
 	if err := gz.Close(); err != nil {
-		_ = out.Close()
 		return errs.Wrap(errs.CodeInternal, err, "cannot compress backup archive")
 	}
-	if err := out.Sync(); err != nil {
-		_ = out.Close()
-		return errs.Wrap(errs.CodeInternal, err, "cannot flush backup archive")
+	return nil
+}
+
+// encodeManifest serializes and bounds the manifest. The reader uses the same
+// bound, so writer and verifier cannot disagree about a valid large inventory.
+func encodeManifest(m *Manifest) ([]byte, error) {
+	body, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return nil, errs.Wrap(errs.CodeInternal, err, "cannot encode manifest")
 	}
-	if err := out.Close(); err != nil {
-		return errs.Wrap(errs.CodeInternal, err, "cannot close backup archive")
+	if len(body) > MaxManifestBytes {
+		return nil, errs.New(errs.CodeValidation,
+			"backup manifest needs %d bytes, above the %d-byte limit; split the workspace or start a new photo-retention policy",
+			len(body), MaxManifestBytes)
+	}
+	return body, nil
+}
+
+// publishByRename is the portable fallback for filesystems without an atomic
+// no-replace rename. The check is best effort; Linux normally uses
+// publishNoReplace's renameat2 path.
+func publishByRename(temp, dest string) error {
+	if _, err := os.Lstat(dest); err == nil {
+		return errs.New(errs.CodeConflict, "refusing to overwrite existing %q", dest)
+	} else if !os.IsNotExist(err) {
+		return errs.Wrap(errs.CodeInternal, err, "cannot inspect backup destination")
+	}
+	if err := os.Rename(temp, dest); err != nil {
+		return errs.Wrap(errs.CodeInternal, err, "cannot publish backup")
 	}
 	return nil
 }

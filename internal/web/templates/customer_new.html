@@ -7,6 +7,7 @@
   <div class="panel-body">
   <form id="customer-form" class="record-form" method="post" action="/customers/new">
     <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <input type="hidden" name="idempotency_key" value="{{.Data.Form.IDKey}}">
     <div class="fields">
       <div class="field"><label for="name">{{$.Tr "common.name"}}</label><input id="name" name="name" value="{{.Data.Form.Name}}" required maxlength="200" autocomplete="name"></div>
       <div class="field"><label for="phone">{{$.Tr "common.phone"}}</label><input id="phone" name="phone" type="tel" value="{{.Data.Form.Phone}}" maxlength="100" autocomplete="tel"></div>

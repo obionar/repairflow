@@ -34,4 +34,29 @@
   </form>
   </div>
 </details>
+{{if eq .Session.Role "admin"}}
+<details class="panel fold-panel" id="settings-printer" open>
+  <summary class="section-heading"><h2>{{$.Tr "settings.printer_heading"}}</h2></summary>
+  <div class="panel-body">
+  <form id="printer-form" class="record-form" method="post" action="/settings/printer">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <div class="fields">
+      <div class="field"><label for="printer_driver">{{$.Tr "settings.printer_label"}}</label>
+        <select id="printer_driver" name="driver">
+          <option value=""{{if not .Data.Printer.Driver}} selected{{end}}>{{$.Tr "settings.printer_none"}}</option>
+          {{range .Data.PrinterDrivers}}<option value="{{.}}"{{if eq . $.Data.Printer.Driver}} selected{{end}}>{{.}}</option>{{end}}
+        </select></div>
+    </div>
+    <div class="form-actions"><button class="primary" type="submit" id="printer-save">{{$.Tr "settings.printer_save"}}</button></div>
+    <p class="muted">{{$.Tr "settings.printer_hint"}}</p>
+  </form>
+  {{if .Data.Printer.Driver}}
+  <form id="printer-test-form" class="record-form" method="post" action="/settings/printer/test">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <div class="form-actions"><button type="submit" id="printer-test">{{$.Tr "settings.printer_test"}}</button></div>
+  </form>
+  {{end}}
+  </div>
+</details>
+{{end}}
 {{template "tail" .}}

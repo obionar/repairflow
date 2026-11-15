@@ -6,7 +6,7 @@ There is no database server, application runtime or outbound network dependency.
 ## Target requirements
 
 - Linux x86-64 (`amd64`) or ARM64 (`arm64`).
-- An operator account that owns the binary and workspace.
+- An operator account that owns the workspace; the default binary is root-owned.
 - Enough local storage for the binary, database, attachments and backups.
 - `systemd` for a user service, or OpenRC for a system service. Foreground operation needs neither.
 
@@ -163,8 +163,34 @@ repairflow restore /path/to/handover.rfbak --home /absolute/path/new-workspace
 repairflow doctor --home /absolute/path/new-workspace
 ```
 
-Restore requires a new, empty destination and never overwrites existing records. The archive
-contains customer data, attachments and password hashes and is not encrypted.
+Restore requires a new, empty destination and never overwrites existing records. `backup verify`
+checks archive hashes and opens the database snapshot; the restore below is the full rehearsal. The
+archive contains customer data, attachments and password hashes and is not encrypted.
+
+## Storage, logs and backup operations
+
+RepairFlow does not schedule backups, rotate OpenRC logs, or issue free-space warnings. Arrange
+these at the host level and check them during [bench testing](BENCH-TEST.md), especially on an SD card.
+
+- **Budget peak space, not just retained originals.** Allow for the live database/WAL and originals,
+  a full SQLite snapshot and compressed archive during backup, a separate restored workspace during
+  rehearsal, and upload staging. Multipart spill and attachment staging can temporarily hold two
+  copies of an upload. Measure actual backup/restore peaks on the target disk before relying on it.
+- **Monitor the workspace, backup destination and temporary filesystem.** `df -h` reports free space;
+  `du -sh /absolute/workspace/files /absolute/workspace/logs /absolute/backup-directory` reports the
+  main consumers. Verification temporarily extracts the database/config under the process's temp
+  directory. Neither these checks nor `doctor` reserve space for the next operation.
+- **Rotate logs externally.** OpenRC writes `<workspace>/logs/service.log`; systemd uses the journal.
+  Configure the host's log manager with a bounded policy. Rotation must coordinate with the writer
+  (stop/restart it or use its supported reopen mechanism); renaming an open log alone may not release
+  disk space. Keep record/audit/attachment retention separate: never rotate database or original files.
+- **Choose a backup cadence from acceptable lost work.** Use the documented create/verify commands
+  from a host scheduler, with unique output names, and check failures. Keep an access-controlled copy
+  off the device, not just on the same SD card. Confirm the scheduler's user can read the workspace.
+  RepairFlow does not encrypt backups or prune old copies automatically.
+- **Rehearse restore regularly and before an upgrade.** Check login, representative records and
+  byte-identical originals from the restored copy. Record duration and required space. Include local
+  translation overrides separately; they are not archived. A checksum pass alone is not recovery proof.
 
 ## Upgrade
 
@@ -178,16 +204,22 @@ extracts the signed manifest and binary, verifies the signature plus artifact SH
 not change the installation by default:
 
 ```bash
-./update-github.sh --tag X.Y.Z --binary "$HOME/.local/bin/repairflow"
+./update-github.sh --tag X.Y.Z --binary /usr/local/bin/repairflow
 ```
 
 Apply only the reviewed candidate:
 
 ```bash
-./update-github.sh --tag X.Y.Z --binary "$HOME/.local/bin/repairflow" --apply
+./update-github.sh --tag X.Y.Z --binary /usr/local/bin/repairflow --apply
 ```
 
-The script requires `wget` or `curl`, `tar` and `sha256sum`. It performs network access only when
+The script performs download and signature verification as the operator, then
+uses `doas` or `sudo` for the local replacement when `/usr/local/bin` is
+root-owned. It never downloads or verifies as root. Automatic escalation refuses symlink
+executables, non-root ownership, or group/world write permission on the executable or any parent
+directory. Pass only the trusted installed binary as `--binary`; privilege executes that path as root.
+
+The script requires `wget` or `curl`, `tar` and `sha256sum`, plus `stat` for automatic escalation. It performs network access only when
 invoked, uses no GitHub API or `jq`, and removes temporary downloads on success or failure. `--apply`
 reuses the installed binary's signed update path and preserves `<executable>.prev`. Restart and
 verify the service separately.
@@ -199,9 +231,15 @@ A signed release archive contains `manifest.json`, `manifest.sig` and the `repai
 ```bash
 tar -xzf repairflow_Linux_x86_64.tar.gz
 repairflow update check --manifest manifest.json --signature manifest.sig
-repairflow update apply --file repairflow \
+sudo /usr/local/bin/repairflow update apply --file repairflow \
   --manifest manifest.json --signature manifest.sig --confirm
 ```
+
+The check can run as the operator. Replacing a root-owned `/usr/local/bin/repairflow`
+requires `sudo` or `doas`; the updater creates a lock next to the executable and
+refuses clearly when it lacks permission. The source installer shares that lock and requires `flock`.
+The updater re-reads the installed version while locked to reject a stale downgrade or re-apply. Do not remove `<exe>.lock` while an update
+is running.
 
 The installed binary must contain the matching release public key. Development and unsigned builds
 refuse `update apply`. RepairFlow verifies the signature, platform, version, file size and SHA-256
@@ -225,7 +263,7 @@ Stop the service and replace the executable. If the executable path changed, rer
 ```bash
 # systemd
 systemctl --user stop repairflow.service
-install -Dm0755 repairflow ~/.local/bin/repairflow
+sudo install -Dm0755 repairflow /usr/local/bin/repairflow
 # If the path changed: repairflow service install --no-enable
 systemctl --user start repairflow.service
 
@@ -235,7 +273,10 @@ repairflow doctor
 ```
 
 Schema migrations run forward-only when the workspace opens; a newer workspace is refused rather
-than downgraded.
+than downgraded. Take and verify a backup before changing binaries, stop the old service before the
+new binary opens the workspace, and remember that reverting the executable alone does not revert a
+migrated schema: recover with the matching pre-upgrade workspace backup. A coordinated upgrade gate
+is still an open audit finding.
 
 ## Uninstall
 
@@ -243,8 +284,11 @@ than downgraded.
 repairflow service remove
 repairflow backup create --output /absolute/path/final-backup.rfbak
 repairflow backup verify /absolute/path/final-backup.rfbak
-rm ~/.local/bin/repairflow
+sudo rm /usr/local/bin/repairflow /usr/local/bin/update-github.sh
+sudo rm -f /usr/local/bin/repairflow.lock
 ```
 
-This removes the service and executable but leaves the workspace intact. Delete the workspace only
-when you no longer need its database, configuration and original attachments.
+This removes the service and executable but leaves the workspace intact. The lock file is only
+created by an update and is safe to remove after the service is stopped; never remove it while an
+update is running. Delete the workspace only when you no longer need its database, configuration and
+original attachments.

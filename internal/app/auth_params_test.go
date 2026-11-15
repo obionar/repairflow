@@ -38,6 +38,17 @@ func TestCheckPasswordHonoursStoredParameters(t *testing.T) {
 	if app.CheckPassword(bad, password) {
 		t.Fatal("out-of-range parameters must not verify")
 	}
+
+	// p is uint8 in the PHC field: a malformed p=320 must be refused, never
+	// silently truncated to p=64 and accepted as that parameter set.
+	lanes := argon2.IDKey([]byte(password), salt, 2, 8192, 64, 32)
+	hash64 := base64.RawStdEncoding.EncodeToString(lanes)
+	if !app.CheckPassword("$argon2id$v=19,m=8192,t=2,p=64$"+base64.RawStdEncoding.EncodeToString(salt)+"$"+hash64, password) {
+		t.Fatal("p=64 must verify")
+	}
+	if app.CheckPassword("$argon2id$v=19,m=8192,t=2,p=320$"+base64.RawStdEncoding.EncodeToString(salt)+"$"+hash64, password) {
+		t.Fatal("p=320 truncated to p=64 must not authenticate")
+	}
 }
 
 // TestConcurrentLastAdminDisable: two operators disabling each other at once

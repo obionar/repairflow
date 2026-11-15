@@ -172,25 +172,26 @@ func (s *Service) setEntryDeleted(ctx context.Context, actor string, entryID int
 	return s.getEntry(ctx, entryID)
 }
 
-// ListEntryRevisions returns the immutable edit history of one entry.
-func (s *Service) ListEntryRevisions(ctx context.Context, entryID int64) ([]EntryRevision, error) {
-	if _, err := s.getEntry(ctx, entryID); err != nil {
-		return nil, err
-	}
+// ListRepairEntryRevisions returns the immutable edit history of every entry on
+// one repair, keyed by entry id. One query for the page keeps a long history
+// from turning the repair view into a query per entry.
+func (s *Service) ListRepairEntryRevisions(ctx context.Context, repairID int64) (map[int64][]EntryRevision, error) {
 	rows, err := s.q(ctx).QueryContext(ctx,
-		`SELECT id, entry_id, actor, prev_kind, prev_body, prev_created_at, created_at
-		 FROM repair_entry_revisions WHERE entry_id = ? ORDER BY id ASC`, entryID)
+		`SELECT r.id, r.entry_id, r.actor, r.prev_kind, r.prev_body, r.prev_created_at, r.created_at
+		 FROM repair_entry_revisions r
+		 JOIN repair_entries e ON e.id = r.entry_id
+		 WHERE e.repair_id = ? ORDER BY r.entry_id ASC, r.id ASC`, repairID)
 	if err != nil {
 		return nil, errs.Wrap(errs.CodeInternal, err, "cannot read entry revisions")
 	}
 	defer func() { _ = rows.Close() }()
-	out := []EntryRevision{}
+	out := map[int64][]EntryRevision{}
 	for rows.Next() {
 		var r EntryRevision
 		if err := rows.Scan(&r.ID, &r.EntryID, &r.Actor, &r.PrevKind, &r.PrevBody, &r.PrevCreatedAt, &r.CreatedAt); err != nil {
 			return nil, errs.Wrap(errs.CodeInternal, err, "cannot read entry revision")
 		}
-		out = append(out, r)
+		out[r.EntryID] = append(out[r.EntryID], r)
 	}
 	return out, rows.Err()
 }

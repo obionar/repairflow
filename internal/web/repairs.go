@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"repairflow/internal/app"
 	"repairflow/internal/errs"
@@ -41,7 +42,8 @@ type repairCreateForm struct {
 	CustomerID                   int64
 	CustomerName                 string
 	Device, Brand, Model, Serial string
-	Issue, Notes                 string
+	Issue                        string
+	IDKey                        string
 }
 
 func (s *Server) repairNew(w http.ResponseWriter, r *http.Request, sess app.Session) {
@@ -58,8 +60,19 @@ func (s *Server) repairNew(w http.ResponseWriter, r *http.Request, sess app.Sess
 			break
 		}
 	}
+	if selected > 0 && selectedName == "" {
+		// The requested customer may be older than the first suggestion page.
+		// Load it by ID so a direct link still pre-fills the real record.
+		customer, err := s.svc.GetCustomer(r.Context(), selected)
+		if err != nil {
+			s.renderError(w, r, sessView(sess), err, statusOf(err))
+			return
+		}
+		selectedName = customer.Name
+		customers.Items = append(customers.Items, customer)
+	}
 	s.render(w, r, "ticket_new", "repair_new.title", sess, map[string]any{
-		"Customers": customers, "Form": repairCreateForm{CustomerID: selected, CustomerName: selectedName},
+		"Customers": customers, "Form": repairCreateForm{CustomerID: selected, CustomerName: selectedName, IDKey: newIdempotencyKey()},
 	})
 }
 
@@ -73,14 +86,22 @@ func (s *Server) resolveCustomer(ctx context.Context, id int64, name string) (in
 	if name == "" {
 		return 0, nil
 	}
-	page, err := s.svc.ListCustomers(ctx, app.CustomerFilter{Search: name, PerPage: 100})
-	if err != nil {
-		return 0, err
-	}
 	matches := []int64{}
-	for _, customer := range page.Items {
-		if strings.EqualFold(strings.TrimSpace(customer.Name), name) {
-			matches = append(matches, customer.ID)
+	for page := 1; ; page++ {
+		res, err := s.svc.ListCustomers(ctx, app.CustomerFilter{Search: name, Page: page, PerPage: 100})
+		if err != nil {
+			return 0, err
+		}
+		for _, customer := range res.Items {
+			if strings.EqualFold(strings.TrimSpace(customer.Name), name) {
+				matches = append(matches, customer.ID)
+				if len(matches) > 1 {
+					return 0, errs.New(errs.CodeValidation, "more than one customer is named %q; choose one from the suggestions", name)
+				}
+			}
+		}
+		if page*res.PerPage >= res.Total || len(res.Items) == 0 {
+			break
 		}
 	}
 	switch len(matches) {
@@ -89,7 +110,7 @@ func (s *Server) resolveCustomer(ctx context.Context, id int64, name string) (in
 	case 1:
 		return matches[0], nil
 	default:
-		return 0, errs.New(errs.CodeConflict, "more than one customer is named %q; choose one from the suggestions", name)
+		return 0, errs.New(errs.CodeValidation, "more than one customer is named %q; choose one from the suggestions", name)
 	}
 }
 
@@ -99,7 +120,8 @@ func (s *Server) repairCreate(w http.ResponseWriter, r *http.Request, sess app.S
 		CustomerName: r.FormValue("customer_name"),
 		Device:       r.FormValue("device"), Brand: r.FormValue("brand"), Model: r.FormValue("model"),
 		Serial: r.FormValue("serial"),
-		Issue:  r.FormValue("issue"), Notes: r.FormValue("notes"),
+		Issue:  r.FormValue("issue"),
+		IDKey:  r.FormValue("idempotency_key"),
 	}
 	var createErr error
 	form.CustomerID, createErr = s.resolveCustomer(r.Context(), form.CustomerID, form.CustomerName)
@@ -107,8 +129,8 @@ func (s *Server) repairCreate(w http.ResponseWriter, r *http.Request, sess app.S
 	if createErr == nil {
 		tk, createErr = s.svc.CreateRepairWithKey(r.Context(), actorOf(sess), app.RepairInput{
 			CustomerID: form.CustomerID, DeviceType: form.Device, Brand: form.Brand, Model: form.Model,
-			Serial: form.Serial, Issue: form.Issue, Notes: form.Notes,
-		}, app.NormalizeIdempotencyKey(r.FormValue("idempotency_key")))
+			Serial: form.Serial, Issue: form.Issue,
+		}, app.NormalizeIdempotencyKey(form.IDKey))
 	}
 	if createErr != nil {
 		if draftable(createErr) {
@@ -132,17 +154,18 @@ type repairForm struct {
 	CustomerID                   int64
 	CustomerName                 string
 	Device, Brand, Model, Serial string
-	Issue, Notes, Revision       string
+	Issue, Revision              string
 	Draft, Conflict              bool
 }
 
 func repairFormOf(t app.Repair) repairForm {
 	return repairForm{CustomerID: t.CustomerID, CustomerName: t.CustomerName,
 		Device: t.DeviceType, Brand: t.Brand, Model: t.Model, Serial: t.Serial,
-		Issue: t.Issue, Notes: t.Notes, Revision: t.Revision}
+		Issue: t.Issue, Revision: t.Revision}
 }
 
 type entryForm struct{ Kind, Body string }
+type pickupForm struct{ By, Notes string }
 
 type repairView struct {
 	app.RepairDetail
@@ -152,7 +175,6 @@ type repairView struct {
 	Customers      app.Page[app.Customer]
 	Parts          []app.Part
 	DeletedParts   []app.Part
-	Estimates      []app.Estimate
 	Attachs        []app.Attachment
 	DeletedAttachs []app.Attachment
 	Stages         []string
@@ -160,12 +182,15 @@ type repairView struct {
 	MaxUpload      int64
 	Form           repairForm
 	EntryForm      entryForm
+	EntryDrafts    map[int64]*entryForm
+	PickupForm     pickupForm
 	PartForm       partForm
 	PartForms      map[int64]partForm
-	EstimateForm   estimateForm
 	CaptionDrafts  map[int64]string
 	DeletedEntries []app.Entry
 	EntryRevisions map[int64][]app.EntryRevision
+	// LabelDriver is the configured label printer, empty when printing is off.
+	LabelDriver string
 }
 
 func (s *Server) repairViewData(ctx context.Context, id int64) (repairView, error) {
@@ -179,20 +204,16 @@ func (s *Server) repairViewData(ctx context.Context, id int64) (repairView, erro
 	}
 	active := make([]app.Entry, 0, len(detail.Entries))
 	deleted := make([]app.Entry, 0)
-	revisions := make(map[int64][]app.EntryRevision)
 	for _, entry := range detail.Entries {
 		if entry.DeletedAt != "" {
 			deleted = append(deleted, entry)
 		} else {
 			active = append(active, entry)
 		}
-		revs, err := s.svc.ListEntryRevisions(ctx, entry.ID)
-		if err != nil {
-			return repairView{}, err
-		}
-		if len(revs) > 0 {
-			revisions[entry.ID] = revs
-		}
+	}
+	revisions, err := s.svc.ListRepairEntryRevisions(ctx, id)
+	if err != nil {
+		return repairView{}, err
 	}
 	detail.Entries = active
 	allParts, err := s.svc.ListRepairParts(ctx, id, true)
@@ -207,10 +228,6 @@ func (s *Server) repairViewData(ctx context.Context, id int64) (repairView, erro
 		} else {
 			parts = append(parts, part)
 		}
-	}
-	estimates, err := s.svc.ListEstimates(ctx, id)
-	if err != nil {
-		return repairView{}, err
 	}
 	allAtts, err := s.svc.ListRepairAttachments(ctx, id, true)
 	if err != nil {
@@ -234,16 +251,21 @@ func (s *Server) repairViewData(ctx context.Context, id int64) (repairView, erro
 	for _, part := range parts {
 		partForms[part.ID] = partFormOf(part)
 	}
+	labelPrinter, err := s.svc.LabelPrinter(ctx)
+	if err != nil {
+		return repairView{}, err
+	}
 	return repairView{
 		RepairDetail: detail, Repair: detail.Repair,
 		Customers: customers,
-		Parts:     parts, DeletedParts: deletedParts, Estimates: estimates,
+		Parts:     parts, DeletedParts: deletedParts,
 		Attachs: atts, DeletedAttachs: deletedAtts,
 		Stages: app.Stages, EntryKinds: app.EntryKinds, MaxUpload: files.MaxAttachmentBytes,
 		Form: repairFormOf(detail.Repair), EntryForm: entryForm{Kind: kind},
-		PartForm: partForm{Fields: map[string]string{"unit": "pcs"}}, PartForms: partForms,
+		PartForm: partForm{Fields: map[string]string{}}, PartForms: partForms,
 		CaptionDrafts:  map[int64]string{},
 		DeletedEntries: deleted, EntryRevisions: revisions,
+		LabelDriver: labelPrinter.Driver,
 	}, nil
 }
 
@@ -272,7 +294,36 @@ func (s *Server) repairShow(w http.ResponseWriter, r *http.Request, sess app.Ses
 		s.renderError(w, r, sessView(sess), err, statusOf(err))
 		return
 	}
+	if r.URL.Query().Get("label") == "printed" {
+		s.renderNotice(w, r, "ticket", s.pageTitle(r, "repair.title", id), sess,
+			s.pageTitle(r, "repair.label_printed"), view)
+		return
+	}
 	s.render(w, r, "ticket", s.pageTitle(r, "repair.title", id), sess, view)
+}
+
+// repairLabel prints the intake sticker: the repair number and customer name,
+// so a device on the shelf can be matched back to this page.
+func (s *Server) repairLabel(w http.ResponseWriter, r *http.Request, sess app.Session) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		s.renderError(w, r, sessView(sess), err, statusOf(err))
+		return
+	}
+	if _, err := s.svc.PrintRepairLabel(r.Context(), actorOf(sess), id); err != nil {
+		view, verr := s.repairViewData(r.Context(), id)
+		if verr != nil {
+			s.renderError(w, r, sessView(sess), verr, statusOf(verr))
+			return
+		}
+		// The printer message is the operator's instruction ("check the
+		// printer before printing again"), so it is shown as written.
+		s.renderStatus(w, r, "ticket", s.pageTitle(r, "repair.title", id), sess,
+			err.Error(), view, statusOf(err))
+		return
+	}
+	// Redirect, so a refresh shows the page instead of printing a second label.
+	http.Redirect(w, r, "/repairs/"+itoa(id)+"?label=printed", http.StatusSeeOther)
 }
 
 func (s *Server) repairUpdate(w http.ResponseWriter, r *http.Request, sess app.Session) {
@@ -284,13 +335,13 @@ func (s *Server) repairUpdate(w http.ResponseWriter, r *http.Request, sess app.S
 	form := repairForm{
 		CustomerID: parseFormID(r.FormValue("customer_id")), CustomerName: r.FormValue("customer_name"),
 		Device: r.FormValue("device"), Brand: r.FormValue("brand"), Model: r.FormValue("model"),
-		Serial: r.FormValue("serial"),
-		Issue:  r.FormValue("issue"), Notes: r.FormValue("notes"),
+		Serial:   r.FormValue("serial"),
+		Issue:    r.FormValue("issue"),
 		Revision: r.FormValue("revision"), Draft: true,
 	}
 	patch := app.RepairPatch{
 		DeviceType: &form.Device, Brand: &form.Brand, Model: &form.Model, Serial: &form.Serial,
-		Issue: &form.Issue, Notes: &form.Notes,
+		Issue: &form.Issue,
 	}
 	if _, present := r.Form["customer_id"]; present {
 		form.CustomerID, err = s.resolveCustomer(r.Context(), form.CustomerID, form.CustomerName)
@@ -390,15 +441,33 @@ func (s *Server) repairEntryAdd(w http.ResponseWriter, r *http.Request, sess app
 }
 
 func (s *Server) repairEntryEdit(w http.ResponseWriter, r *http.Request, sess app.Session) {
-	s.repairMutation(w, r, sess, func() error {
-		eid, err := pathID(r, "eid")
-		if err != nil {
-			return err
-		}
-		body, kind := r.FormValue("body"), r.FormValue("kind")
-		_, err = s.svc.EditRepairEntry(r.Context(), actorOf(sess), eid, &kind, &body)
-		return err
-	})
+	id, err := pathID(r, "id")
+	if err != nil {
+		s.renderError(w, r, sessView(sess), err, statusOf(err))
+		return
+	}
+	eid, err := pathID(r, "eid")
+	if err != nil {
+		s.renderError(w, r, sessView(sess), err, statusOf(err))
+		return
+	}
+	form := entryForm{Kind: r.FormValue("kind"), Body: r.FormValue("body")}
+	_, err = s.svc.EditRepairEntry(r.Context(), actorOf(sess), eid, &form.Kind, &form.Body)
+	if err != nil {
+		s.repairFormError(w, r, sess, id, err, func(view *repairView) {
+			if !entryKindValid(form.Kind) {
+				for _, entry := range append(view.Entries, view.DeletedEntries...) {
+					if entry.ID == eid {
+						form.Kind = entry.Kind
+						break
+					}
+				}
+			}
+			view.EntryDrafts = map[int64]*entryForm{eid: &form}
+		})
+		return
+	}
+	redirectBack(w, r, "/repairs/"+itoa(id))
 }
 
 func (s *Server) repairEntryDelete(w http.ResponseWriter, r *http.Request, sess app.Session) {
@@ -424,13 +493,18 @@ func (s *Server) repairEntryRestore(w http.ResponseWriter, r *http.Request, sess
 }
 
 func (s *Server) repairPickup(w http.ResponseWriter, r *http.Request, sess app.Session) {
-	s.repairMutation(w, r, sess, func() error {
-		id, err := pathID(r, "id")
-		if err != nil {
-			return err
-		}
-		_, err = s.svc.SetRepairPickup(r.Context(), actorOf(sess), id,
-			r.FormValue("pickup_at"), r.FormValue("picked_up_by"), r.FormValue("pickup_notes"))
-		return err
-	})
+	id, err := pathID(r, "id")
+	if err != nil {
+		s.renderError(w, r, sessView(sess), err, statusOf(err))
+		return
+	}
+	form := pickupForm{By: r.FormValue("picked_up_by"), Notes: r.FormValue("pickup_notes")}
+	// Collection time is the moment the operator records it; no backdating control.
+	_, err = s.svc.SetRepairPickup(r.Context(), actorOf(sess), id,
+		time.Now().UTC().Format(time.RFC3339), form.By, form.Notes)
+	if err != nil {
+		s.repairFormError(w, r, sess, id, err, func(view *repairView) { view.PickupForm = form })
+		return
+	}
+	redirectBack(w, r, "/repairs/"+itoa(id))
 }

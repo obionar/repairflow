@@ -144,7 +144,9 @@ step_mod_verify() { go mod verify; }
 step_mod_tidy() { go mod tidy -diff; }
 
 step_license_inventory() {
-  python3 -m unittest -v tests/license_inventory_test.py
+  if ! python3 -m unittest -v tests/license_inventory_test.py; then
+    return 1
+  fi
   python3 scripts/license_inventory.py check
 }
 

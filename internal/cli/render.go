@@ -60,6 +60,20 @@ func renderData(data any) (string, bool) {
 		return out, true
 	case app.Repair:
 		return renderRepair(v), true
+	case app.PrinterSettings:
+		driver := v.Driver
+		if driver == "" {
+			driver = "off"
+		}
+		return fmt.Sprintf("label printer: %s\n", driver), true
+	case app.TestLabelPrint:
+		return fmt.Sprintf("printed test label on %s\n", v.Printer), true
+	case app.LabelPrint:
+		customer := v.CustomerName
+		if customer == "" {
+			customer = "(unassigned)"
+		}
+		return fmt.Sprintf("printed label for repair #%d — %s on %s\n", v.RepairID, customer, v.Printer), true
 	case app.Page[app.Repair]:
 		out := fmt.Sprintf("repairs: %d total (page %d, %d per page)\n", v.Total, v.Page, v.PerPage)
 		for _, t := range v.Items {

@@ -73,6 +73,9 @@ func TestRunDemoIsSingleRunWithPublicLogin(t *testing.T) {
 	if !strings.Contains(text, "serve --home ") {
 		t.Fatalf("foreground serve invocation missing: %q", text)
 	}
+	if !strings.Contains(stdout.String(), "http://127.0.0.1:8091/login") {
+		t.Fatalf("login URL missing from output: %q", stdout.String())
+	}
 
 	// The temporary workspace must be gone after the foreground process exits.
 	leftovers, err := filepath.Glob(filepath.Join(tmpRoot, "repairflow-demo.*"))
@@ -106,5 +109,67 @@ func TestRunDemoRefusesMissingBinary(t *testing.T) {
 	}
 	if !strings.Contains(string(output), "no executable found") {
 		t.Fatalf("missing binary message: %q", output)
+	}
+}
+
+func TestDemoDirectoryLauncherDelegates(t *testing.T) {
+	canonical, err := os.ReadFile("run-demo.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	launcher, err := os.ReadFile("../demo/run-demo.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bootstrap, err := os.ReadFile("../demo/bootstrap.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "scripts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "demo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "scripts", "run-demo.sh"), canonical, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "demo", "run-demo.sh"), launcher, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "demo", "bootstrap.sh"), bootstrap, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	logFile := filepath.Join(root, "calls.log")
+	fake := "#!/bin/sh\nprintf '%s|%s\\n' \"$*\" \"${REPAIRFLOW_NEW_PASSWORD:-}\" >> \"" + logFile + "\"\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(root, "repairflow"), []byte(fake), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tmpRoot := filepath.Join(root, "tmp")
+	if err := os.Mkdir(tmpRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	home := filepath.Join(root, "home")
+	if err := os.Mkdir(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("sh", filepath.Join(root, "demo", "run-demo.sh"))
+	cmd.Env = []string{"HOME=" + home, "PATH=/usr/bin:/bin", "TMPDIR=" + tmpRoot}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("demo/run-demo.sh: %v (%s)", err, out)
+	}
+	calls, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(calls), "init --demo --demo-user demo --home ") ||
+		!strings.Contains(string(calls), "|repairflow\n") ||
+		!strings.Contains(string(calls), "serve --home ") {
+		t.Fatalf("launcher did not delegate to the canonical demo: %q", calls)
+	}
+	if !strings.Contains(string(out), "http://127.0.0.1:8091/login") {
+		t.Fatalf("launcher output missing login URL: %q", out)
 	}
 }

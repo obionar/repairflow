@@ -2,6 +2,8 @@ package cli
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 
 	"repairflow/internal/config"
 	"repairflow/internal/db"
@@ -31,6 +33,17 @@ func runServe(ctx context.Context, opts options, args []string, getenv Env) (any
 	status, err := workspace.Check(home)
 	if err != nil {
 		return nil, err
+	}
+	// net/http stages large multipart file parts in os.TempDir before
+	// files.Store copies them into run/; on hosts where /tmp is a RAM-backed
+	// tmpfs that spends RAM on a 256 MB upload. Keep the spill in the
+	// workspace's owner-only staging directory instead (swept by `cleanup`).
+	runDir := filepath.Join(home, "run")
+	if err := os.MkdirAll(runDir, 0o700); err != nil {
+		return nil, errs.Wrap(errs.CodeInternal, err, "cannot create upload staging directory")
+	}
+	if err := os.Setenv("TMPDIR", runDir); err != nil {
+		return nil, errs.Wrap(errs.CodeInternal, err, "cannot set the upload staging directory")
 	}
 	svc, closeDB, err := openService(ctx, home, opts.logger)
 	if err != nil {

@@ -8,7 +8,6 @@ import (
 
 	"repairflow/internal/app"
 	"repairflow/internal/errs"
-	"repairflow/internal/files"
 )
 
 func (s *Server) attachmentAdd(w http.ResponseWriter, r *http.Request, sess app.Session) {
@@ -17,7 +16,12 @@ func (s *Server) attachmentAdd(w http.ResponseWriter, r *http.Request, sess app.
 		s.postResult(w, r, sess, err, "/repairs/"+r.PathValue("id"))
 		return
 	}
-	if err := r.ParseMultipartForm(files.MaxAttachmentBytes + (1 << 20)); err != nil {
+	// One threshold for the whole server (parseRequestForm): form fields stay in
+	// memory, the file part spills to the staging directory and streams from
+	// disk. A maxMemory near MaxAttachmentBytes would hold the whole upload in
+	// RAM — on a small host that is an OOM, not an inconvenience. The body size
+	// itself is capped by MaxBytesReader in applyRequestBodyLimit.
+	if err := parseRequestForm(r); err != nil {
 		s.postResult(w, r, sess, errs.Wrap(errs.CodeValidation, err, "upload too large or malformed"), "/repairs/"+itoa(id))
 		return
 	}

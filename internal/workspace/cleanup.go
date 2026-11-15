@@ -13,8 +13,9 @@ import (
 // Cleanup removes disposable workspace content using the retention
 // definition:
 //
-//   - run/: interrupted-upload staging files (*.part) older than one hour.
-//     Fresh staging files belong to in-flight operations and are kept.
+//   - run/: interrupted-upload staging files (*.part and net/http multipart-*
+//     spill files) older than one hour. Fresh staging files belong to
+//     in-flight operations and are kept.
 //   - cache/: regenerable content, removable at any time.
 //
 // User data is NEVER touched: data/ (database), files/ (attachment originals),
@@ -54,7 +55,7 @@ func Cleanup(home string) (*CleanupResult, error) {
 		if name == "purge.lock" {
 			continue // purge/recovery serialization lock; never diagnostic noise
 		}
-		if !strings.HasSuffix(name, ".part") {
+		if !strings.HasSuffix(name, ".part") && !strings.HasPrefix(name, "multipart-") {
 			res.Skipped = append(res.Skipped, filepath.Join("run", name))
 			continue
 		}

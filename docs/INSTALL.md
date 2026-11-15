@@ -14,6 +14,29 @@ Linux amd64 and arm64 are tested. Other platforms are not currently supported ta
 
 ## Install the executable
 
+### One command from a source checkout
+
+```bash
+git clone https://github.com/obionar/repairflow
+cd repairflow
+./install-repairflow
+```
+
+The source installer requires `flock` (util-linux or a BusyBox build with the applet enabled).
+It builds the binary and installs it to `/usr/local/bin/repairflow`; the
+installer uses `doas` or `sudo` for that one step when the target is root-owned.
+Set `REPAIRFLOW_PREFIX` to change the install root (for example
+`REPAIRFLOW_PREFIX=$HOME/.local` to install without privileges). To update, run
+`git pull && ./install-repairflow` again: the binary is replaced atomically
+under the same executable lock as signed updates, existing workspaces and configuration are kept,
+and each workspace database migrates automatically on the next command or
+start, from any supported previous version. Restart a running RepairFlow
+service separately to pick up the new binary. For a schema-changing upgrade, take and verify a backup
+first and stop the service before the new binary opens the workspace; an executable-only rollback
+does not revert a migrated schema. If the service was installed from
+an older path such as `~/.local/bin/repairflow`, rerun `repairflow service
+install --home /absolute/workspace` so the unit uses the new binary path.
+
 ### From a release archive
 
 Download both archives and `SHA256SUMS` from the GitHub release, then check them together:
@@ -21,10 +44,16 @@ Download both archives and `SHA256SUMS` from the GitHub release, then check them
 ```bash
 sha256sum -c SHA256SUMS
 tar -xzf repairflow_Linux_x86_64.tar.gz
-install -Dm0755 repairflow ~/.local/bin/repairflow
-install -Dm0755 update-github.sh ~/.local/bin/update-github.sh
-~/.local/bin/repairflow version
+sudo install -Dm0755 repairflow /usr/local/bin/repairflow
+sudo install -Dm0755 update-github.sh /usr/local/bin/update-github.sh
+/usr/local/bin/repairflow version
 ```
+
+On a host using `doas`, replace `sudo` with `doas`. `/usr/local/bin` is
+root-owned: a regular user can execute RepairFlow but cannot replace the
+binary. Keep that property when installing as root; do not make the directory
+writable by the service account. A signed update of this installation needs
+`sudo`/`doas` for the apply step; see [Deployment](DEPLOY.md).
 
 Checking the whole set keeps the command portable: Alpine's BusyBox `sha256sum` has no GNU
 `--ignore-missing`.
@@ -38,15 +67,15 @@ executable at a stable path: service units and updates refer to that location.
 
 ```bash
 make build
-install -Dm0755 repairflow ~/.local/bin/repairflow
-~/.local/bin/repairflow version
+sudo install -Dm0755 repairflow /usr/local/bin/repairflow
+/usr/local/bin/repairflow version
 ```
 
-If `~/.local/bin` is not on `PATH`, call `~/.local/bin/repairflow` directly or add this to your
-shell profile:
+If `/usr/local/bin` is not on `PATH`, call `/usr/local/bin/repairflow` directly
+or add this to your shell profile:
 
 ```bash
-export PATH="$HOME/.local/bin:$PATH"
+export PATH="/usr/local/bin:$PATH"
 ```
 
 The examples below use `repairflow` for readability.
@@ -59,8 +88,25 @@ From a source checkout:
 ./scripts/run-demo.sh
 ```
 
-Open <http://127.0.0.1:8091/login> and use `demo` / `repairflow`. The launcher creates a temporary
-workspace filled with synthetic customers, repairs, entries, parts, estimates and attachments.
+or, from the public repository root as a fresh clone:
+
+```bash
+git clone https://github.com/obionar/repairflow
+cd repairflow/demo
+./run-demo.sh
+```
+
+The `demo/` launcher uses an existing binary, builds from source when Go is
+available, or downloads and checksum-verifies the matching Linux release into
+`demo/bin/`. It then creates a temporary synthetic workspace. `./dev.sh` keeps
+one workspace under `demo/workspace/` for development; `./reset.sh` restores it
+while the demo content is pristine. No SQLite database is committed: the dataset
+is generated from `internal/seed`.
+
+Open <http://127.0.0.1:8091/login> and use `demo` / `repairflow`. The launcher opens that page in
+the local browser and prints the machine's other addresses (the demo serves loopback only; other
+devices need explicit remote access, see `docs/DEPLOY.md`). The launcher creates a temporary
+workspace filled with synthetic customers, repairs, entries, parts and attachments.
 Press **Ctrl+C** to stop the server and remove that workspace.
 
 Do not use the demo credentials or dataset for real work.

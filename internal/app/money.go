@@ -108,8 +108,10 @@ func parseDecimal(field, value string, maxFrac int) (int64, int64, error) {
 
 // LineTotalCents computes one line total using the documented rounding rule:
 // round-half-up(quantity_milli × unit_price_cents / 1000), integer math only.
+// Split scaling keeps the product exact up to both field maxima (the
+// single-step multiply overflows int64 there and would return a negative total).
 func LineTotalCents(quantityMilli, unitPriceCents int64) int64 {
-	return (quantityMilli*unitPriceCents + 500) / 1000
+	return (quantityMilli/1000)*unitPriceCents + ((quantityMilli%1000)*unitPriceCents+500)/1000
 }
 
 // DiscountCents computes the discount for a subtotal using the same rule:

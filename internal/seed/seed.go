@@ -1,5 +1,5 @@
 // Package seed provides the isolated synthetic demo dataset. Every record is
-// obviously fake ("DEMO" names and devices), created through the same app
+// obviously fake (funny fictional names and devices), created through the same app
 // services as real data, and marked in seed_markers. Seeding is refusal-first:
 // it never runs over existing business data and never touches anything outside
 // the given workspace database.
@@ -21,14 +21,14 @@ import (
 // stores the content fingerprint of the pristine seeded state (provenance
 // for the demo reset guard).
 //
-// demo-v2 added part lines, estimates (accepted + draft), pickup state and
-// extra repairs/media. demo-v3 is the "big pack": 16 customers and 44 repairs
+// demo-v5 is the simplified funny-names pack: 16 customers and 44 repairs
 // generated across every stage, including archived and picked-up records, so a
-// newcomer can explore a populated shop instead of an empty one. Older demo
-// datasets are not reseeded or reset (synthetic data; recreate the workspace).
+// newcomer can explore a populated shop instead of an empty one. It has
+// whole-piece parts and no estimates. Older demo datasets are not reseeded or
+// reset (synthetic data; recreate the workspace).
 const (
-	DemoKey      = "demo-v3"
-	DemoStateKey = "demo-v3-state"
+	DemoKey      = "demo-v5"
+	DemoStateKey = "demo-v5-state"
 )
 
 // DemoActor is the audit identity recorded for seeded rows.
@@ -65,12 +65,7 @@ var (
 	DemoEntries     = countDemo(func(r demoRepair) int { return len(r.entries) })
 	DemoParts       = countDemo(func(r demoRepair) int { return len(r.parts) })
 	DemoAttachments = len(demoMedia)
-	DemoEstimates   = countDemo(func(r demoRepair) int {
-		if r.estimate != nil {
-			return 1
-		}
-		return 0
-	})
+	DemoEstimates   = 0 // the web demo no longer creates estimates
 )
 
 func countDemo(f func(demoRepair) int) int {
@@ -103,15 +98,6 @@ type demoPart struct {
 	removed     bool
 }
 
-// demoEstimate creates a versioned estimate snapshot after the repair's
-// active parts exist; Accept records the customer's approval.
-type demoEstimate struct {
-	note          string
-	discountKind  string
-	discountValue int64
-	accept        bool
-}
-
 type demoPickup struct{ at, by, notes string }
 
 type demoRepair struct {
@@ -123,7 +109,6 @@ type demoRepair struct {
 	stageChain []demoStageStep
 	entries    []demoEntry
 	parts      []demoPart
-	estimate   *demoEstimate
 	pickup     *demoPickup
 }
 
@@ -131,102 +116,99 @@ type demoRepair struct {
 // content (and therefore the manifest checksum) is fixed. The dataset covers
 // every workflow the UI can show: new/intake, diagnostics, waiting for parts,
 // repair, unsuccessful repair, customer test, repair complete with pickup,
-// parts with unknown cost, a removed part, an accepted estimate with a
-// discount and a draft estimate.
+// parts with unknown cost and a removed part.
 var showcaseData = struct {
 	customers []demoCustomer
 	repairs   []demoRepair
 }{
 	customers: []demoCustomer{
-		{"Ada Beispiel (DEMO)", "+49 000 0001", "ada@example.invalid", "Synthetic demo customer. Prefers email contact."},
-		{"Boris Demo (DEMO)", "+49 000 0002", "boris@example.invalid", "Synthetic demo customer."},
-		{"Chloé Test (DEMO)", "+33 000 0003", "chloe@example.invalid", "Synthetic demo customer. Drop-off on Fridays."},
-		{"Derya Muster (DEMO)", "+49 000 0004", "derya@example.invalid", "Synthetic demo customer. Café owner; invoices by email."},
+		{"Sir Reginald Solderworth", "+49 000 0001", "reginald@example.invalid", "Claims the laptop only crashes when invoices are due."},
+		{"Professor Bytewhisker", "+49 000 0002", "bytewhisker@example.invalid", "Brings three devices at once so they can keep each other company."},
+		{"Madame Capacita", "+33 000 0003", "capacita@example.invalid", "Requests every screw be returned in a tiny labelled bag."},
+		{"Baron von Screwdriver", "+49 000 0004", "screwdriver@example.invalid", "Says the dishwasher is emotionally unstable."},
 	},
 	repairs: []demoRepair{
 		{
-			customer: 0, device: "ThinkPad T480 (DEMO)", issue: "Does not power on; burning smell near the charging port.",
-			notes: "Synthetic demo repair. Intake photos are intentionally not part of this dataset.",
+			customer: 0, device: "Lappytop Crunchbook 480", issue: "Does not power on; smells like a barbecue started inside the charging port.",
+			notes: "Customer says it worked fine until the cat looked at it. The cat denies everything.",
 			stageChain: []demoStageStep{
 				{"in_progress", false}, {"waiting_parts", false}, {"in_progress", false}, {"repaired", false},
 			},
 			entries: []demoEntry{
-				{"work", "Replaced burnt DC-in jack and tested charging circuit."},
-				{"test", "24h burn-in passed; battery charges to 100%."},
-				{"handover", "Device collected by customer; receipt handed over."},
+				{"work", "Replaced the crispy charging jack and apologised to the motherboard."},
+				{"test", "24h burn-in passed; battery charges to 100% and only complains politely."},
+				{"handover", "Collected by Sir Reginald; receipt, cat photo and tiny screw bag handed over."},
 			},
 			parts: []demoPart{
-				{description: "DC-in power jack", qtyMilli: 1000, unit: "pcs", costCents: 1450, priceCents: 3900, notes: "OEM-compatible replacement."},
-				{description: "Thermal paste", qtyMilli: 500, unit: "g", costCents: 320, priceCents: 900},
+				{description: "DC-in power jack", qtyMilli: 1000, unit: "pcs", costCents: 1450, priceCents: 3900, notes: "OEM-compatible, unlike the cat."},
+				{description: "Thermal paste (syringe)", qtyMilli: 1000, unit: "pcs", costCents: 320, priceCents: 900},
 			},
-			estimate: &demoEstimate{note: "Goodwill discount after the parts delay.", discountKind: "percent", discountValue: 10, accept: true},
-			pickup:   &demoPickup{at: "2026-11-09T14:20:00Z", by: "Ada Beispiel", notes: "Collected with receipt; paid on collection."},
+			pickup: &demoPickup{at: "2026-11-09T14:20:00Z", by: "Sir Reginald Solderworth", notes: "Collected with receipt; paid on collection and left a biscuit."},
 		},
 		{
-			customer: 1, device: "iPhone 12 (DEMO)", issue: "Cracked screen; touch input dead on the lower half.",
+			customer: 1, device: "Pocket Rectangle 12", issue: "Cracked screen; the lower half of the touchscreen has retired.",
 			stageChain: []demoStageStep{{"in_progress", false}},
 			entries: []demoEntry{
-				{"work", "Screen assembly removed; replacement part on order."},
+				{"work", "Screen assembly removed; replacement part on order and pretending to be patient."},
 			},
 			parts: []demoPart{
 				{description: "Screen assembly (OLED)", qtyMilli: 1000, unit: "pcs", costCents: 8900, priceCents: 14900},
 			},
-			estimate: &demoEstimate{note: "Quote for screen assembly including labour; awaiting customer approval."},
 		},
 		{
-			customer: 1, device: "Bosch dishwasher (DEMO)", issue: "Error E15; water collected in the base pan.",
-			notes:      "Synthetic demo repair.",
+			customer: 1, device: "Dishwasher of Doom", issue: "Error E15; water collected in the base pan and formed a tiny swimming pool.",
+			notes:      "Customer requests no exorcism, just a repair.",
 			stageChain: []demoStageStep{{"waiting_parts", false}},
 			entries: []demoEntry{
-				{"note", "Dried base pan and ran diagnostics; leak sensor triggers intermittently."},
-				{"contact", "Called customer to approve the sump-hose replacement cost."},
+				{"note", "Dried the base pan; leak sensor still being dramatic."},
+				{"contact", "Called customer to approve the sump-hose replacement; approved in three languages."},
 			},
 			parts: []demoPart{
 				{description: "Sump hose", qtyMilli: 2000, unit: "pcs", costCents: 640, priceCents: 1490},
 			},
 		},
 		{
-			customer: 2, device: "Gaming PC (DEMO)", issue: "Random reboots under GPU load.",
+			customer: 2, device: "RGB Toaster XL", issue: "Random reboots under load; fans sound like a tiny helicopter.",
 			stageChain: []demoStageStep{{"in_progress", false}, {"lab_test", false}},
 			entries: []demoEntry{
-				{"test", "FurMark 2h: 3 reboots at 82C hotspot; PSU rails within spec."},
+				{"test", "Burn-in: three reboots, one existential crisis; power rails look innocent."},
 			},
 			parts: []demoPart{
-				{description: "650 W PSU (80+ Gold)", qtyMilli: 1000, unit: "pcs", costCents: 5200, priceCents: 8900, notes: "Cost price not yet confirmed by supplier."},
+				{description: "650 W PSU (80+ Gold)", qtyMilli: 1000, unit: "pcs", costCents: 5200, priceCents: 8900, notes: "Supplier price pending; supplier also pending."},
 			},
 		},
 		{
-			customer: 2, device: "Kindle Paperwhite (DEMO)", issue: "Screen frozen on boot logo after firmware update.",
+			customer: 2, device: "Read-o-Matic 3000", issue: "Frozen on the boot logo after an update; the book remains unread.",
 			stageChain: []demoStageStep{{"no_repair", false}},
 			entries: []demoEntry{
-				{"handover", "Board-level NAND failure; device returned unrepaired, no charge."},
+				{"handover", "Board-level sulk; returned unrepaired with no charge and a bookmark."},
 			},
 		},
 		{
-			customer: 3, device: "Rancilio Silvia espresso machine (DEMO)", issue: "No pressure at the group head; pump runs constantly.",
+			customer: 3, device: "Espresso Rocket 'Morning Zeal'", issue: "No pressure at the group head; pump runs like it is being chased.",
 			stageChain: []demoStageStep{{"in_progress", false}, {"customer_test", false}},
 			entries: []demoEntry{
-				{"work", "Replaced the solenoid valve and descaled the brew circuit."},
-				{"test", "9 bar at the group head after 3 min warm-up; ready for the customer's trial."},
+				{"work", "Replaced the solenoid valve; descaled the brew circuit and the customer's patience."},
+				{"test", "9 bar at the group head; espresso now strong enough to rename the cat."},
 			},
 			parts: []demoPart{
 				{description: "Solenoid valve", qtyMilli: 1000, unit: "pcs", costCents: 2100, priceCents: 4200},
 			},
 		},
 		{
-			customer: 3, device: "Sony WH-1000XM4 (DEMO)", issue: "Right cup silent after water damage.",
+			customer: 3, device: "Silent Disco Headphones", issue: "Right cup silent after water damage; left cup refuses to comment.",
 			stageChain: []demoStageStep{{"in_progress", false}},
 			entries: []demoEntry{
-				{"work", "Cleaned the board and reflowed the right-channel output; headband replacement cancelled."},
+				{"work", "Cleaned the board, reflowed the right channel and negotiated a truce."},
 			},
 			parts: []demoPart{
 				{description: "Headband assembly", qtyMilli: 1000, unit: "pcs", costCents: 3000, priceCents: 6500, removed: true},
-				{description: "Foam ear pads", qtyMilli: 1000, unit: "pair", costCents: 500, priceCents: 1500},
+				{description: "Foam ear pads", qtyMilli: 2000, unit: "pcs", costCents: 500, priceCents: 1500},
 			},
 		},
 		{
-			customer: 0, device: "MacBook Air M1 (DEMO)", issue: "Keyboard repeats keys after a liquid spill.",
-			notes:      "Dropped off this morning; diagnosis not started yet.",
+			customer: 0, device: "Featherbook Airy", issue: "Keyboard repeats keys after a liquid spill; it now has opinions.",
+			notes:      "Dropped off this morning; diagnosis not started; customer already apologised to the keyboard.",
 			stageChain: nil,
 		},
 	},
@@ -248,49 +230,51 @@ var demoData = struct {
 // and rendering with non-ASCII names.
 func bulkCustomers() []demoCustomer {
 	return []demoCustomer{
-		{"Ελένη Παπαδοπούλου (DEMO)", "+357 00 200001", "eleni@example.invalid", "Synthetic demo customer. Calls in the morning."},
-		{"Γιώργος Δημητρίου (DEMO)", "+357 00 200002", "giorgos@example.invalid", "Synthetic demo customer. Regular, prefers SMS."},
-		{"Марia Иванова (DEMO)", "+7 000 200003", "maria@example.invalid", "Synthetic demo customer. Invoices in Russian."},
-		{"Дмитрий Соколов (DEMO)", "+7 000 200004", "dmitry@example.invalid", "Synthetic demo customer."},
-		{"Elif Yılmaz (DEMO)", "+90 000 200005", "elif@example.invalid", "Synthetic demo customer. Prefers WhatsApp."},
-		{"Mehmet Kaya (DEMO)", "+90 000 200006", "mehmet@example.invalid", "Synthetic demo customer. Brings devices in pairs."},
-		{"Sophie Martin (DEMO)", "+33 000 200007", "sophie@example.invalid", "Synthetic demo customer."},
-		{"Lukas Weber (DEMO)", "+49 000 200008", "lukas@example.invalid", "Synthetic demo customer. B2B account, pays on invoice."},
-		{"Carmen Ruiz (DEMO)", "+34 000 200009", "carmen@example.invalid", "Synthetic demo customer."},
-		{"Nikos Andreou (DEMO)", "+357 00 200010", "nikos@example.invalid", "Synthetic demo customer. Walk-in, cash only."},
-		{"Anna Kowalska (DEMO)", "+48 000 200011", "anna@example.invalid", "Synthetic demo customer."},
-		{"James Okafor (DEMO)", "+44 000 200012", "james@example.invalid", "Synthetic demo customer. Ships devices by courier."},
+		{"Nina Nutshell", "+357 00 200001", "nina@example.invalid", "Prefers repair updates by carrier pigeon; accepts email as backup."},
+		{"Gadget Gregorian", "+357 00 200002", "gadget@example.invalid", "Tips in biscuits. Biscuits are not legal tender, but appreciated."},
+		{"Lola Loopback", "+7 000 200003", "lola@example.invalid", "Believes every cable has a soul and should be untangled gently."},
+		{"Mx. Tinker Tumble", "+7 000 200004", "tinker@example.invalid", "Asks for a loyalty card on the first visit."},
+		{"Κυρία Καλωδιοπούλου", "+90 000 200005", "kavlodiopoulou@example.invalid", "Wants the device back before the olives are pressed."},
+		{"Γιώργος Κατσαβιδόπουλος", "+90 000 200006", "katsavidopoulos@example.invalid", "Calls every device 'the thingamajig'."},
+		{"Мадам Проволочкина", "+33 000 200007", "provolochkina@example.invalid", "Requests a receipt in Cyrillic and a summary in mime."},
+		{"Товарищ Транзисторов", "+49 000 200008", "tranzistorov@example.invalid", "Maintains the toaster has been plotting since 2019."},
+		{"Elif Elektrik", "+34 000 200009", "elif@example.invalid", "Says the phone is fine; the phone disagrees."},
+		{"Mehmet Multimetre", "+357 00 200010", "mehmet@example.invalid", "Brings a multimeter to every conversation."},
+		{"Sophie Solder", "+48 000 200011", "sophie@example.invalid", "Wants the repair documented in iambic pentameter."},
+		{"Lukas Lötkolben", "+44 000 200012", "lukas@example.invalid", "Insists on paying in exact change and unsolicited life advice."},
 	}
 }
 
 // bulkRepairs generates the rest of the pack. The spread is deliberate: every
 // stage appears several times, entries cover all five kinds, and some records
-// carry a part with unknown cost, a soft-deleted line, a draft or accepted
-// estimate, a pickup, and an archived state.
+// carry a part with unknown cost, a soft-deleted line, a pickup, and an archived
+// state.
 func bulkRepairs(customerOffset int) []demoRepair {
 	devices := []string{
-		"Dell Latitude 5420", "HP EliteBook 840", "Lenovo IdeaPad 5", "MacBook Pro 13 (2019)",
-		"Samsung Galaxy S21", "Google Pixel 6", "Xiaomi Redmi Note 12", "iPad Air (2022)",
-		"PlayStation 5", "Xbox Series S", "Nintendo Switch OLED", "LG 27\" monitor",
-		"Canon MG5750 printer", "Brother HL-L2350", "Miele washing machine", "Bosch fridge",
-		"Philips air fryer", "Dyson V11 vacuum",
+		"Dusty Lapdesk 5420", "Wishpad 5", "Pro Crumblebook 13", "Galaxophone S21",
+		"Pixel Puddle 6", "Reddie Notepad 12", "Flatpad Breeze (2022)", "PlayCrate 5",
+		"BoxStation Series S", "Switchy Glowpad", "Glowbox 27\" monitor", "Cannonball SplatPrinter 5750",
+		"Sister SnoozePrinter 2350", "Suds-o-Matic washing machine", "Frosty Vault fridge",
+		"Crispy Vortex air fryer", "Dust Goblin V11 vacuum", "Mystery Meat Thermometer",
 	}
 	issues := []string{
-		"Does not power on.", "Battery drains in under an hour.", "Overheating under load.",
-		"Liquid damage; unstable behaviour.", "Screen flickers at low brightness.",
-		"No sound from the speakers.", "Charging port loose.", "Storage full; slow boot.",
-		"Wi-Fi drops every few minutes.", "Boot loop after an update.", "Loud fan noise.",
-		"Dents and a cracked bezel.", "Paper jam every print.", "Drum error on start-up.",
-		"Water leak during the spin cycle.", "Compressor runs but does not cool.",
-		"Display shows an error code.", "Battery does not charge at all.",
+		"Makes a noise like a sad kettle when charging.", "Battery lasts exactly one email.",
+		"Overheats whenever it sees a spreadsheet.", "Liquid damage; device now speaks in dial-up sounds.",
+		"Screen flickers at low brightness and low morale.", "Speakers produce sound only for podcasts about cheese.",
+		"Charging port loose; cable falls out when judged.", "Storage full of duplicate photos of the same cat.",
+		"Wi-Fi drops whenever the microwave tells a joke.", "Boot loop after an update; device is stuck in its origin story.",
+		"Fan noise loud enough to qualify as a leaf blower.", "Dents and a cracked bezel; device lost a fight with a door.",
+		"Paper jam every print, especially urgent documents.", "Drum error on start-up; printer is having a percussion crisis.",
+		"Water leak during the spin cycle; laundry now includes the floor.", "Compressor runs but does not cool; fridge is on a spiritual journey.",
+		"Display shows an error code and refuses to elaborate.", "Battery does not charge; device claims it is on strike.",
 	}
 	entryText := []string{
-		"Diagnosed the fault and ordered parts", "Cleaned the board and reseated connectors",
-		"Ran a burn-in test", "Explained the options and quoted the repair",
-		"Replaced the faulty component", "Updated the firmware and reset settings",
-		"Confirmed the fault is intermittent", "Checked the power rails",
-		"Tested the device with the customer present", "Prepared the device for collection",
-		"Recorded serial numbers and accessories", "Verified the repair after reassembly",
+		"Diagnosed the fault and ordered the least cursed part", "Cleaned the board and reseated connectors; apologised to both",
+		"Ran a burn-in test; device survived, technician almost did", "Explained the options and quoted the repair with a straight face",
+		"Replaced the faulty component and the customer's pessimism", "Updated firmware and reset settings to factory-ish",
+		"Confirmed the fault is intermittent; device performed on cue", "Checked the power rails and their emotional state",
+		"Tested with the customer present; both beeped approvingly", "Prepared the device for collection and found the missing screw",
+		"Recorded serial numbers, accessories and one mysterious crumb", "Verified the repair after reassembly; only one screw left over, so we hid it",
 	}
 	stagePool := []struct {
 		stage string
@@ -312,17 +296,17 @@ func bulkRepairs(customerOffset int) []demoRepair {
 		{description: "Thermal pads", qtyMilli: 2000, unit: "pcs", costCents: 250, priceCents: 800},
 		{description: "Cooling fan", qtyMilli: 1000, unit: "pcs", costCents: 1200, priceCents: 2900},
 		{description: "USB-C port", qtyMilli: 1000, unit: "pcs", costCents: 700, priceCents: 1900},
-		{description: "Silicone grease", qtyMilli: 300, unit: "g", costCents: 180, priceCents: 600},
-		{description: "Rubber feet set", qtyMilli: 1000, unit: "set", costCents: 120, priceCents: 450},
+		{description: "Silicone grease (tube)", qtyMilli: 1000, unit: "pcs", costCents: 180, priceCents: 600},
+		{description: "Rubber feet set", qtyMilli: 1000, unit: "pcs", costCents: 120, priceCents: 450},
 	}
 	out := make([]demoRepair, 0, 36)
 	for i := 0; i < 36; i++ {
 		s := stagePool[i%len(stagePool)]
 		r := demoRepair{
 			customer:   customerOffset + i%12,
-			device:     fmt.Sprintf("%s (DEMO %02d)", devices[i%len(devices)], i+1),
+			device:     fmt.Sprintf("%s Mk.%02d", devices[i%len(devices)], i+1),
 			issue:      issues[(i*5)%len(issues)],
-			notes:      "Synthetic demo repair from the bulk pack.",
+			notes:      fmt.Sprintf("Bulk demo repair #%02d; the device demanded equal screen time.", i+1),
 			stageChain: s.chain,
 			archived:   i%9 == 0,
 		}
@@ -345,22 +329,10 @@ func bulkRepairs(customerOffset int) []demoRepair {
 		if i%11 == 0 && len(r.parts) > 1 {
 			r.parts[0].removed = true
 		}
-		if i%4 == 0 {
-			// An estimate needs at least one active part line to price.
-			if len(r.parts) == 0 {
-				r.parts = append(r.parts, partPool[(i+3)%len(partPool)])
-			}
-			r.estimate = &demoEstimate{
-				note:          "Bulk demo estimate covering parts and labour.",
-				discountKind:  "percent",
-				discountValue: 5,
-				accept:        i%8 == 0,
-			}
-		}
 		if s.stage == "repaired" && i%2 == 0 {
 			r.pickup = &demoPickup{
 				at:    "2026-11-05T10:00:00Z",
-				by:    "Demo Customer",
+				by:    "A Very Punctual Customer",
 				notes: "Collected after a successful test.",
 			}
 		}
@@ -467,22 +439,6 @@ func seedDataset(ctx context.Context, svc *app.Service) (Result, error) {
 					return err
 				}
 			}
-			if t.estimate != nil {
-				est, err := svc.CreateEstimate(ctx, DemoActor, created.ID, app.EstimateInput{
-					Note:          t.estimate.note,
-					DiscountKind:  t.estimate.discountKind,
-					DiscountValue: t.estimate.discountValue,
-				})
-				if err != nil {
-					return err
-				}
-				res.Estimates++
-				if t.estimate.accept {
-					if _, err := svc.AcceptEstimate(ctx, DemoActor, est.ID); err != nil {
-						return err
-					}
-				}
-			}
 			if t.pickup != nil {
 				if _, err := svc.SetRepairPickup(ctx, DemoActor, created.ID,
 					t.pickup.at, t.pickup.by, t.pickup.notes); err != nil {
@@ -568,11 +524,6 @@ func manifestChecksum() string {
 			h.Write([]byte(p.description + "\x1f" + p.unit + "\x1f" + p.notes + "\x1f"))
 			h.Write([]byte(strconv.FormatInt(p.qtyMilli, 10) + "\x1f" + strconv.FormatInt(p.costCents, 10) + "\x1f" +
 				strconv.FormatInt(p.priceCents, 10) + "\x1f" + map[bool]string{true: "removed", false: "active"}[p.removed]))
-		}
-		if t.estimate != nil {
-			h.Write([]byte{0x05})
-			h.Write([]byte(t.estimate.note + "\x1f" + t.estimate.discountKind + "\x1f" +
-				strconv.FormatInt(t.estimate.discountValue, 10) + "\x1f" + map[bool]string{true: "accepted", false: "draft"}[t.estimate.accept]))
 		}
 		if t.pickup != nil {
 			h.Write([]byte{0x06})

@@ -12,17 +12,19 @@
 
   function sync() {
     var value = input.value.trim().toLowerCase();
-    var match = "";
+    var matches = [];
     if (value) {
       for (var i = 0; i < list.options.length; i++) {
         var option = list.options[i];
         if (option.value.trim().toLowerCase() === value) {
-          match = option.getAttribute("data-id") || "";
-          break;
+          matches.push(option.getAttribute("data-id") || "");
         }
       }
     }
-    id.value = match;
+    // Only an unambiguous suggestion sets the hidden ID. Two customers with
+    // the same name leave it blank so the server refuses the ambiguous name
+    // instead of silently choosing the first one.
+    id.value = matches.length === 1 ? matches[0] : "";
   }
 
   input.addEventListener("input", sync);

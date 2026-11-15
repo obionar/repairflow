@@ -56,8 +56,10 @@ func validateIdempotencyKey(key string) error {
 }
 
 // replayResult reads a stored result for a matching key/fingerprint and
-// decodes it into out. Mismatched fingerprints are conflicts.
-func (s *Service) replayResult(ctx context.Context, key, operation, want string, scope int64, out any) (bool, error) {
+// decodes it into out. Mismatched fingerprints are conflicts. legacyWant
+// carries fingerprints accepted from records written before a payload field
+// was added, so an upgrade does not turn an old retry into a false conflict.
+func (s *Service) replayResult(ctx context.Context, key, operation, want string, scope int64, out any, legacyWant ...string) (bool, error) {
 	var gotFingerprint, resultJSON, gotOperation string
 	var gotScope int64
 	err := s.q(ctx).QueryRowContext(ctx,
@@ -69,7 +71,14 @@ func (s *Service) replayResult(ctx context.Context, key, operation, want string,
 	if err != nil {
 		return false, errs.Wrap(errs.CodeInternal, err, "cannot read idempotency record")
 	}
-	if gotFingerprint != want || gotOperation != operation || gotScope != scope {
+	match := gotFingerprint == want
+	for _, legacy := range legacyWant {
+		if gotFingerprint == legacy {
+			match = true
+			break
+		}
+	}
+	if !match || gotOperation != operation || gotScope != scope {
 		return false, errs.New(errs.CodeConflict,
 			"idempotency key %q was already used for a different request payload", key)
 	}
@@ -168,12 +177,15 @@ func (s *Service) CreateCustomerWithKey(ctx context.Context, actor string, in Cu
 	if err != nil {
 		return Customer{}, err
 	}
-	fp := fingerprint("customer.create", in.Name, in.Phone, in.Email, in.Notes, actorNorm)
+	fp := fingerprint("customer.create", in.Name, in.Phone, in.Email, in.Address, in.Notes, actorNorm)
+	// Keys written before address joined the fingerprint remain replayable.
+	// New keys bind every field, so a changed address is still a conflict.
+	legacyFP := fingerprint("customer.create", in.Name, in.Phone, in.Email, in.Notes, actorNorm)
 
 	var customer Customer
 	err = s.InTx(ctx, func(ctx context.Context) error {
 		var replayed Customer
-		hit, err := s.replayResult(ctx, key, "customer.create", fp, 0, &replayed)
+		hit, err := s.replayResult(ctx, key, "customer.create", fp, 0, &replayed, legacyFP)
 		if err != nil {
 			return err
 		}

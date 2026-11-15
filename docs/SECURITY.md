@@ -24,7 +24,8 @@ before storing sensitive customer data.
   affected sessions.
 - Repeated login failures are throttled, with a 15-minute lockout after five failures. The bounded
   throttle evicts only expired or non-locked entries under capacity pressure; flooding cannot clear
-  an active account lockout.
+  an active account lockout. At most two password hashes run concurrently; excess login attempts are
+  refused with HTTP 429 before the expensive Argon2 work starts.
 - Request bodies are capped before form parsing: 64 KiB for login, 1 MiB for ordinary forms, and the
   256 MiB attachment limit plus 1 MiB for multipart overhead. Oversized requests receive HTTP 413.
   Per-request read deadlines are 15 seconds for login, 30 seconds for ordinary forms and five
@@ -42,21 +43,37 @@ before storing sensitive customer data.
 - Only content-sniffed JPEG, PNG and WebP images up to 8 MiB are previewed inline; other files download.
 - Permanent attachment purge requires admin confirmation and a 30-day retention period. Recovery
   links protect original bytes across the database commit.
-- Backup creation and restore verify database and attachment integrity. Restore never overwrites an
-  existing workspace.
-- Signed updates require Ed25519 and SHA-256 verification, regular files, platform and
-  version checks, staged/published readback and a health check. Symlinks, FIFOs, unsigned builds,
-  same-version installs and downgrades are refused.
+- Backup verification and restore share structure, size and hash checks, validate any archived
+  configuration, and check the database's integrity, declared schema and attachment sizes/hashes.
+  A restore into a disposable workspace remains the full recovery rehearsal. Restore never
+  overwrites an existing workspace.
+- Signed updates require Ed25519 and SHA-256 verification, regular files, platform and version
+  checks, staged/published readback and a health check. Symlinks, FIFOs, unsigned builds, same-version
+  installs and downgrades are refused. Updates and source installs share a lock next to the
+  executable. Updates re-read the installed version under that lock before applying version policy.
+  Replacing a root-owned `/usr/local/bin/repairflow` requires `sudo`/`doas`.
 - The application makes no outbound network requests during ordinary use. The optional
   `scripts/update-github.sh` accesses GitHub only when the operator invokes it, extracts only the
   expected files from the platform archive, and still requires the installed binary to verify the
-  signed manifest and hash before applying an update.
+  signed manifest and hash before applying an update. When it needs privilege for the local
+  replacement, automatic escalation requires a regular, non-symlink root-owned binary and
+  root-owned parent directories without group/world write permission. It refuses unsafe paths
+  rather than executing them as root; ownership/mode checks require `stat`.
+- Label printing (off by default) runs one fixed local command, `p15`, with a repair number and
+  customer name as arguments: no shell, a bounded timeout, inherited environment only. Only an
+  administrator selects the printer and only a technician prints. p15 itself needs
+  `cap_net_raw,cap_net_admin` for Bluetooth and is installed by the host operator; RepairFlow never
+  takes those capabilities, and a failed print is reported rather than retried automatically.
 
 ## Trust boundaries
 
 **The operating-system account that owns the workspace is the real security boundary.** A process
 running as that account can read or modify the database and attachments directly, bypassing web
 roles. Web roles are cooperative application permissions, not a sandbox between OS processes.
+
+The default executable is `/usr/local/bin/repairflow`, owned by root and executable by regular users.
+The installer uses `doas`/`sudo` only for the local replacement step; workspaces remain owned by the
+operator at the default `~/.repairflow` path or an explicit `--home`/`REPAIRFLOW_HOME`.
 
 CLI `--actor` and `$USER` are self-asserted audit labels, not authentication. Web audit actors come
 from authenticated sessions.

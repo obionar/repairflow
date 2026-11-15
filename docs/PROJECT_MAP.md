@@ -3,6 +3,8 @@
 Use this page to locate implementation and test ownership. Coding agents should also read
 [AGENTS.md](../AGENTS.md) and load the matching guide under [`skills/`](../skills/).
 
+See [Workshop bench testing](BENCH-TEST.md) for isolated target-hardware and restore checks.
+
 Run `make symbols` to generate the ignored `dist/SYMBOLS.md` declaration index. Do not hand-edit or
 commit generated output.
 
@@ -46,6 +48,7 @@ parse input and render output. `internal/files` owns attachment paths and origin
 | `internal/app/workflow.go` | Pickup, entry recovery and archive workflows |
 | `internal/app/money.go`, `parts.go`, `estimates.go` | Integer money, parts and estimates |
 | `internal/app/dashboard.go` | Open-work and awaiting-pickup queues |
+| `internal/app/labels.go` | Label-printer setting and repair-sticker printing |
 | `internal/app/attachments.go` | Attachment metadata, upload and entry links |
 | `internal/app/attachment_lifecycle.go` | Retention and destructive operations |
 | `internal/app/attachment_reconcile.go` | Metadata and original-byte reconciliation |
@@ -53,10 +56,12 @@ parse input and render output. `internal/files` owns attachment paths and origin
 | `internal/app/idempotency.go` | Intake replay and conflict handling |
 | `internal/app/fingerprint.go` | Demo content provenance |
 | `internal/files/` | Streaming, hashing, publishing, export and recoverable deletion |
+| `internal/printer/` | Label-printer driver adapter (Marklife P15 through the p15 CLI) |
 | `internal/backup/` | Verified `.rfbak` creation, validation and restore |
 | `internal/update/` | Signed manifests and verified binary replacement |
 | `internal/service/` | Named systemd user units and OpenRC scripts |
 | `internal/seed/` | Deterministic synthetic data, media and reset |
+| `demo/` | One-shot demo, persistent development workspace and reset helpers; database is generated, never committed |
 | `internal/web/server.go` | Server construction, routes, templates and listener |
 | `internal/web/middleware.go` | Authentication, host, CSRF and request logging |
 | `internal/web/render.go` | Page rendering, errors and sessions |
@@ -70,6 +75,9 @@ parse input and render output. `internal/files` owns attachment paths and origin
 | `internal/testutil/` | Failure-fast helpers shared by test fixtures |
 | `tests/e2e/` | Real-binary Chromium workflows; separate Go module |
 | `tests/*.py` | Disposable CLI lifecycle and hostile-input smoke tests |
+| `scripts/verify-all.sh` | Full local verification gate |
+| `scripts/update-github.sh` | Operator-invoked signed GitHub release download |
+| `install-repairflow` | One-command build-and-install/update from a source checkout |
 
 ## Contracts and tests
 

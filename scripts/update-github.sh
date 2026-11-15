@@ -22,6 +22,8 @@ Usage: update-github.sh --tag VERSION [options]
   --apply             replace the binary after verification; default is check-only
   -h, --help          show this help
 
+Automatic doas/sudo requires a root-owned binary and parent directories,
+with no group/world write permission and no executable symlink.
 Restart the service separately after a successful apply.
 EOF
 }
@@ -29,6 +31,21 @@ EOF
 fail() {
   echo "update-github: $*" >&2
   exit 1
+}
+
+# An executable is replaceable when any parent is writable, even if the file is not.
+require_privileged_binary() {
+  command -v stat >/dev/null 2>&1 || fail "stat is required for privileged apply"
+  [ -f "$BINARY" ] && [ ! -L "$BINARY" ] || fail "privileged apply requires a regular, non-symlink binary"
+  checked=$BINARY
+  while :; do
+    owner=$(stat -c %u -- "$checked") || fail "cannot inspect ownership: $checked"
+    mode=$(stat -c %a -- "$checked") || fail "cannot inspect permissions: $checked"
+    [ "$owner" = 0 ] && [ "$((0$mode & 022))" -eq 0 ] ||
+      fail "refusing privileged apply: $checked must be root-owned and not group/world-writable"
+    [ "$checked" != / ] || break
+    checked=$(dirname "$checked")
+  done
 }
 
 cleanup() {
@@ -72,6 +89,9 @@ case "$BINARY" in
   */*) [ -x "$BINARY" ] || fail "binary is not executable: $BINARY" ;;
   *) BINARY=$(command -v "$BINARY") || fail "cannot find repairflow on PATH" ;;
 esac
+# Resolve parent symlinks once so privilege checks and invocation use one absolute path.
+BINARY_DIR=$(CDPATH= cd -P -- "$(dirname "$BINARY")" && pwd) || fail "cannot resolve binary directory"
+BINARY=$BINARY_DIR/$(basename "$BINARY")
 command -v sha256sum >/dev/null 2>&1 || fail "sha256sum is required"
 command -v tar >/dev/null 2>&1 || fail "tar is required"
 
@@ -140,8 +160,23 @@ SIZE=$(wc -c < "$WORK/repairflow" | tr -d '[:space:]')
 
 echo "update verified: $TAG (linux/$ARCH)"
 if [ "$APPLY" -eq 1 ]; then
-  "$BINARY" update apply --file "$WORK/repairflow" --manifest "$WORK/manifest.json" \
-    --signature "$WORK/manifest.sig" --confirm
+  if [ -w "$(dirname "$BINARY")" ] || [ "$(id -u)" -eq 0 ]; then
+    # Network access already finished as the operator. Only the local,
+    # signature-verified replacement runs here.
+    "$BINARY" update apply --file "$WORK/repairflow" --manifest "$WORK/manifest.json" \
+      --signature "$WORK/manifest.sig" --confirm
+  else
+    require_privileged_binary
+    if command -v doas >/dev/null 2>&1; then
+      priv=doas
+    elif command -v sudo >/dev/null 2>&1; then
+      priv=sudo
+    else
+      fail "the installed binary is not writable; rerun with root privileges (doas/sudo) or use a writable REPAIRFLOW_PREFIX"
+    fi
+    "$priv" "$BINARY" update apply --file "$WORK/repairflow" --manifest "$WORK/manifest.json" \
+      --signature "$WORK/manifest.sig" --confirm
+  fi
   echo "restart the RepairFlow service, then run version and doctor"
 else
   echo "check-only: no installed file was changed; re-run with --apply to install"

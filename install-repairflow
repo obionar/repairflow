@@ -1,0 +1,117 @@
+#!/bin/sh
+# Install or update RepairFlow from this source checkout with one command:
+#
+#   git clone https://github.com/obionar/repairflow && cd repairflow && ./install-repairflow
+#
+# Re-run after `git pull` to update. The installed binary is replaced atomically
+# (safe while a service is running) and every workspace database migrates
+# automatically on the next command or start, from supported previous versions.
+# Stop old writers before opening a workspace with a schema-changing upgrade.
+# Configuration and data are never rewritten by this script.
+set -eu
+LC_ALL=C
+export LC_ALL
+
+root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+prefix=${REPAIRFLOW_PREFIX:-/usr/local}
+bin=$prefix/bin/repairflow
+workdir=${REPAIRFLOW_HOME:-$HOME/.repairflow}
+
+if [ $# -gt 0 ]; then
+  case "$1" in
+    -h|--help)
+      cat <<'EOF'
+Usage: install-repairflow
+
+Builds the repairflow binary from this checkout and installs it to
+$REPAIRFLOW_PREFIX/bin/repairflow (default: /usr/local/bin/repairflow).
+The default location is root-owned: a regular user can execute it but not
+replace it. The script uses doas or sudo for only the install step when needed;
+set REPAIRFLOW_PREFIX to another directory to install without privilege.
+
+Re-run after `git pull` to update. Workspaces are untouched; their database
+schema migrates automatically on the next command or start. Restart a running
+RepairFlow service separately to pick up the new binary. Set VERSION=... to
+stamp a version other than the Makefile default.
+EOF
+      exit 0
+      ;;
+    *)
+      echo "install-repairflow: unexpected argument \"$1\" (try --help)" >&2
+      exit 2
+      ;;
+  esac
+fi
+
+# /usr/local is root-owned so a regular user can execute the installed binary
+# but cannot replace it. Escalate only the short install step; the build and
+# workspace validation still run as the operator.
+priv=""
+if [ "$(id -u)" -ne 0 ]; then
+  probe=$prefix
+  while [ ! -e "$probe" ]; do probe=$(dirname "$probe"); done
+  target=$probe
+  [ -d "$prefix/bin" ] && target=$prefix/bin
+  if [ ! -w "$target" ]; then
+    if command -v doas >/dev/null 2>&1; then
+      priv=doas
+    elif command -v sudo >/dev/null 2>&1; then
+      priv=sudo
+    else
+      echo "install-repairflow: $prefix is not writable; rerun as root or install doas/sudo (or set REPAIRFLOW_PREFIX)" >&2
+      exit 1
+    fi
+  fi
+fi
+
+
+command -v make >/dev/null 2>&1 || {
+  echo "install-repairflow: make is required (see docs/INSTALL.md)" >&2
+  exit 1
+}
+
+command -v flock >/dev/null 2>&1 || {
+  echo "install-repairflow: flock is required to serialize installs and updates" >&2
+  exit 1
+}
+
+make -C "$root" build
+
+old=""
+if [ -x "$bin" ]; then
+  old=$("$bin" version 2>/dev/null | head -n 1 || true)
+fi
+
+# Share the updater's lock; operation-owned staging cannot clobber its .new.
+${priv:+$priv }mkdir -p "$prefix/bin"
+${priv:+$priv }sh -eu -c '
+  source=$1
+  bin=$2
+  umask 077
+  exec 9>>"$bin.lock"
+  flock -x 9
+  staged=$(mktemp "$bin.install.XXXXXX")
+  trap '\''rm -f "$staged"'\'' EXIT
+  trap '\''exit 1'\'' HUP INT TERM
+  cp "$source" "$staged"
+  chmod 0755 "$staged"
+  mv -f "$staged" "$bin"
+' sh "$root/repairflow" "$bin"
+
+new=$("$bin" version 2>/dev/null | head -n 1 || true)
+echo "Installed $new to $bin"
+if [ -n "$old" ]; then
+  echo "Previous installation: $old"
+fi
+
+if [ -f "$workdir/config.toml" ]; then
+  # Idempotent: validates the existing config with the new binary and heals
+  # any missing workspace layout directories. Never rewrites the config.
+  "$bin" init >/dev/null
+  echo "Workspace $workdir kept; its schema migrates on the next command or start."
+  echo "If a RepairFlow service is installed, rerun: $bin service install --home $workdir"
+else
+  echo "No workspace yet. Create one with: repairflow init"
+fi
+
+echo "Restart a running RepairFlow service to use the new binary."

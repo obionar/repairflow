@@ -50,7 +50,7 @@ func TestContactDeviceParityMigrationPreservesRecords(t *testing.T) {
 		t.Fatalf("migration changed existing data: address=%q device_type=%q issue=%q", address, deviceType, issue)
 	}
 	version, err := CurrentVersion(ctx, handle)
-	if err != nil || version != 9 {
+	if err != nil || version != LatestVersion() {
 		t.Fatalf("version=%d err=%v", version, err)
 	}
 	var legacyColumns int
@@ -108,8 +108,8 @@ func TestRepairCustomerOptionalMigrationPreservesRecords(t *testing.T) {
 		t.Fatalf("migrate to v9: %v", err)
 	}
 	version, err := CurrentVersion(ctx, handle)
-	if err != nil || version != 9 {
-		t.Fatalf("version=%d err=%v, want 9", version, err)
+	if err != nil || version != LatestVersion() {
+		t.Fatalf("version=%d err=%v, want %d", version, err, LatestVersion())
 	}
 	var customerID int64
 	var device, issue string
@@ -138,6 +138,15 @@ func TestRepairCustomerOptionalMigrationPreservesRecords(t *testing.T) {
 	var foreignKeys int
 	if err := handle.QueryRowContext(ctx, `PRAGMA foreign_keys`).Scan(&foreignKeys); err != nil || foreignKeys != 1 {
 		t.Fatalf("foreign_keys after migration = %d, err=%v; want 1", foreignKeys, err)
+	}
+	// An upgraded workspace keeps the new domain rows and starts with label
+	// printing switched off.
+	var labelDriver string
+	if err := handle.QueryRowContext(ctx, `SELECT driver FROM label_printer WHERE id = 1`).Scan(&labelDriver); err != nil {
+		t.Fatalf("label printer row missing after upgrade: %v", err)
+	}
+	if labelDriver != "" {
+		t.Fatalf("label printer default = %q, want off", labelDriver)
 	}
 	if err := IntegrityCheck(ctx, handle); err != nil {
 		t.Fatal(err)
@@ -241,5 +250,25 @@ func TestPreRenameWorkspaceIsRefused(t *testing.T) {
 	}
 	if repairs != 0 || tickets != 1 || migrations != 1 {
 		t.Fatalf("guard must not write: repairs=%d tickets=%d migrations=%d", repairs, tickets, migrations)
+	}
+}
+
+// TestCurrentVersionWithoutMigrationTable: a database that has never been
+// migrated reports version 0 by inspecting sqlite_master, not by matching a
+// driver error message whose wording we do not control.
+func TestCurrentVersionWithoutMigrationTable(t *testing.T) {
+	ctx := context.Background()
+	handle, err := Open(ctx, filepath.Join(t.TempDir(), "empty.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = handle.Close() })
+
+	version, err := CurrentVersion(ctx, handle)
+	if err != nil {
+		t.Fatalf("a database without schema_migrations must report version 0, got %v", err)
+	}
+	if version != 0 {
+		t.Fatalf("version = %d, want 0", version)
 	}
 }

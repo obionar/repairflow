@@ -5,7 +5,7 @@
 # See docs/USAGE.md.
 
 GO      ?= go
-VERSION ?= 0.1.0-dev
+VERSION ?= 0.2.0-dev
 COMMIT  ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 DATE    ?= $(shell git log -1 --format=%cI 2>/dev/null || echo unknown)
 LDFLAGS := -X repairflow/internal/buildinfo.Version=$(VERSION) \
@@ -13,7 +13,7 @@ LDFLAGS := -X repairflow/internal/buildinfo.Version=$(VERSION) \
            -X repairflow/internal/buildinfo.Date=$(DATE)
 BIN := repairflow
 
-.PHONY: build test vet fmt-check verify verify-all fuzz e2e cross release symbols clean licenses license-check
+.PHONY: build test vet fmt-check verify verify-all fuzz e2e demo demo-dev cross release symbols clean licenses license-check
 
 build:
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags '$(LDFLAGS)' -o $(BIN) ./cmd/repairflow
@@ -37,6 +37,13 @@ verify-all:
 # Test-only tooling lives in tests/e2e (separate module).
 e2e:
 	cd tests/e2e && go test -v .
+
+# One-shot synthetic demo and persistent contributor workspace.
+demo:
+	./demo/run-demo.sh
+
+demo-dev:
+	./demo/dev.sh
 
 fuzz:
 	$(GO) test -run=NONE -fuzz=FuzzParseToml -fuzztime=25s ./internal/config/

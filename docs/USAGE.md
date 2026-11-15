@@ -7,17 +7,18 @@ CLI operate on the same records and enforce the same domain rules.
 
 1. **Create or select a customer.** Store contact details, address and notes. Customer records can
    be archived when no longer active.
-2. **Open a repair.** Record the device type, brand, model, serial number, reported issue and
-   internal notes. A customer is optional at intake.
+2. **Open a repair.** Record the device type, brand, model, serial number and reported issue;
+   put all intake information in the issue field. A customer is optional at intake.
 3. **Add log entries.** Use `work`, `test`, `contact`, `handover` or `note` entries to build a dated
    history. Editing an entry preserves its previous revisions; deleted entries can be restored.
-4. **Add parts and estimates.** Part lines have a description, quantity, unit, optional cost and
-   price. Creating an estimate snapshots the active part lines; accepting a new estimate supersedes
-   the previously accepted version.
-5. **Move the repair through its stages.** A typical path is `new` → `in_progress` →
+4. **Add parts.** The web form uses a description, whole-piece quantity, optional cost and price.
+   The CLI retains the versioned-estimate commands for compatibility; the web repair page does not
+   expose estimates.
+5. **Change the repair status.** A typical path is `new` → `in_progress` →
    `waiting_parts` → `lab_test` → `customer_test` → `repaired` or `no_repair`; the workflow does not
    require every stage, and [the CLI contract](CLI-CONTRACT.md) lists every allowed transition.
-6. **Record collection.** Pickup is separate from repair stage, so a repaired device can remain in
+6. **Record collection.** Pickup is separate from repair status and the web records the collection
+   time automatically. A repaired device can remain in
    the awaiting-pickup queue until handover.
 7. **Archive when appropriate.** Archived customers and repairs retain their records and history.
    Archived repairs remain visible in the list with an archived badge.
@@ -25,6 +26,12 @@ CLI operate on the same records and enforce the same domain rules.
 Reopening `repaired` or `no_repair` work is explicit and audited. The dashboard shows open-work and
 awaiting-pickup queues, including repairs without a customer; archived records do not appear in
 those queues.
+
+Rejected entry corrections and pickup submissions keep the submitted fields on the repair page so
+you can fix and retry them. If an entry was deleted meanwhile, its rejected correction is available
+as read-only text under deleted entries for copying; restore the entry before editing it. Drafts
+are not saved to browser storage or across session expiry, so copy long unsaved notes before
+signing in again.
 
 ### Repairs without a customer
 
@@ -38,6 +45,26 @@ repairflow repair update REPAIR_ID --no-customer
 ```
 
 JSON represents an unassigned repair with `customer_id: 0` and `unassigned: true`.
+
+## Repair labels
+
+**Print repair label** on a repair page prints one sticker with the repair number and the customer
+name, so a device on the shelf can be matched back to its page. An unassigned repair prints the
+repair number alone. Each click prints one label; nothing is printed automatically and a failed print
+is never retried, because the label may already have reached paper. Confirmed prints appear in the
+repair's activity trail.
+
+The label printer is chosen by an administrator in **Settings → Label printer**. Only the Marklife
+P15 is supported today (`p15`), through its own driver:
+
+1. Install `p15` on the host that runs RepairFlow, for the same user, so `p15` is on `PATH` or at
+   `/usr/local/bin/p15`. Run its daemon, so a warm link keeps the usual ~5 s print short.
+2. Select `p15` in Settings and use **Print test label** to confirm the setup.
+
+Printer-specific values stay in the p15 configuration (`p15 config get|set`: print density, label
+size, printer name) so each setting has one authority. p15 takes exclusive control of one Bluetooth
+adapter while it prints; use a dedicated adapter on a shared host. When the printer is unavailable,
+repairs keep working and the print action reports the driver's reason.
 
 ## Attachments
 
@@ -57,18 +84,16 @@ an admin, an explicit confirmation and a 30-day retention period. JPEG, PNG and 
 8 MiB can preview inline; other supported uploads are downloaded unchanged. The default upload
 limit is 256 MiB per file.
 
-## Parts and estimates
+## Parts
 
 ```bash
 repairflow repair part-add REPAIR_ID --description "Battery" --qty 1 --price 49.90
-repairflow estimate create REPAIR_ID --note "Initial estimate"
-repairflow estimate list REPAIR_ID
-repairflow estimate accept ESTIMATE_ID
 ```
 
-Money input uses decimal EUR with at most two decimal places; quantities allow three decimals.
-Estimates are immutable snapshots, not invoices or payment records. RepairFlow does not track stock
-levels, payments, deposits or refunds.
+The web form accepts a whole-piece quantity and always stores `pcs`. The CLI/API retain decimal
+quantities and unit fields for existing data and scripts. Estimate commands remain in the CLI/API for
+compatibility, but estimates are not exposed on the web repair page; they are snapshots, not invoices
+or payment records. RepairFlow does not track stock levels, payments, deposits or refunds.
 
 ## CLI essentials
 
@@ -110,9 +135,13 @@ repairflow backup create --output /absolute/path/repairflow.rfbak
 repairflow backup verify /absolute/path/repairflow.rfbak
 ```
 
-A backup contains a consistent database snapshot, configuration and original attachments. Cache,
-logs and runtime files are excluded. Backups are **not encrypted** and include customer data and
-password hashes; protect them accordingly.
+A backup contains a consistent database snapshot, configuration when present, and original attachments.
+Cache, logs, runtime files and local `locales/` translation overrides are excluded; copy overrides
+separately if you use them. Backups are **not encrypted** and include customer data and
+password hashes; protect them accordingly. `backup verify` checks the archive structure and hashes,
+cross-checks declared sizes and schema against the contents, opens the database snapshot, checks
+attachment rows, and validates any archived configuration. It uses the same checks as restore but
+is not a substitute for a real restore rehearsal.
 
 Restore only into a new, empty workspace:
 
@@ -127,8 +156,9 @@ It never overwrites an existing workspace. Test recovery before you need it.
 ## Demo maintenance
 
 The demo launcher is the safest way to explore RepairFlow because it always starts with a fresh
-temporary workspace. An existing proven demo workspace can be reset only while its synthetic content
-is unchanged:
+temporary workspace (`./demo/run-demo.sh` or `./scripts/run-demo.sh`). For a persistent synthetic
+workspace, use `./demo/dev.sh`; it keeps `demo/workspace/` between runs. An existing proven demo
+workspace can be reset only while its synthetic content is unchanged:
 
 ```bash
 repairflow demo reset --confirm --home /absolute/path/demo-workspace
@@ -146,7 +176,8 @@ repairflow cleanup
 ```
 
 - `status` summarizes the workspace and record counts.
-- `doctor` checks configuration, schema, database integrity and attachment consistency.
+- `doctor` checks configuration, schema, database integrity, and attachment metadata plus the stored
+  bytes (it hash-verifies every retained attachment, so a large gallery takes longer).
 - `cleanup` removes stale upload staging and cache data only; it does not remove records,
   attachments, configuration, backups or recovery data.
 

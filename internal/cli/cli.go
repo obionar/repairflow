@@ -66,6 +66,9 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	case "repair", "ticket": // "ticket" is the documented one-release alias.
 		command = "repair " + sub(rest)
 		data, err = runRepair(ctx, opts, rest, getenv)
+	case "printer":
+		command = "printer " + sub(rest)
+		data, err = runPrinter(ctx, opts, rest, getenv)
 	case "estimate":
 		command = "estimate " + sub(rest)
 		data, err = runEstimate(ctx, opts, rest, getenv)

@@ -25,17 +25,17 @@ type mediaSample struct {
 // and one on a log entry. Variants keep every sample
 // byte-distinct so the demo never shows two identical files.
 var demoMedia = []mediaSample{
-	{fileName: "intake front (DEMO).png", caption: "Intake photo: front of the device (synthetic)", source: "demo", repair: 0, entry: -1, variant: 0},
-	{fileName: "burnt dc jack (DEMO).png", caption: "Evidence photo on the work log (synthetic)", source: "demo", repair: 0, entry: 0, variant: 1},
-	{fileName: "screen crack (DEMO).png", caption: "Crack pattern before replacement (synthetic)", source: "demo", repair: 1, entry: -1, variant: 2},
-	{fileName: "wiring schematic (DEMO).pdf", caption: "Service wiring diagram (synthetic placeholder)", source: "demo", repair: 2, entry: 1, variant: 3},
-	{fileName: "firmware backup (DEMO).bin", caption: "Firmware dump before board work (synthetic)", source: "demo", repair: 3, entry: -1, variant: 4},
-	{fileName: "group head pressure (DEMO).png", caption: "Pressure test at the group head (synthetic)", source: "demo", repair: 5, entry: 1, variant: 5},
-	{fileName: "water damage residue (DEMO).png", caption: "Residue on the right-channel board (synthetic)", source: "demo", repair: 6, entry: 0, variant: 6},
+	{fileName: "intake_front_of_mystery.png", caption: "Intake photo: the mystery before the screwdriver", source: "demo", repair: 0, entry: -1, variant: 0},
+	{fileName: "burnt_toast_jack.png", caption: "Evidence: the charging port formerly known as a port", source: "demo", repair: 0, entry: 0, variant: 1},
+	{fileName: "screen_crack_constellation.png", caption: "Crack pattern: accidental modern art", source: "demo", repair: 1, entry: -1, variant: 2},
+	{fileName: "wiring_schematic_ish.pdf", caption: "Service diagram: mostly wires, partly hope", source: "demo", repair: 2, entry: 1, variant: 3},
+	{fileName: "firmware_backup_do_not_panic.bin", caption: "Firmware dump: synthetic, like the confidence", source: "demo", repair: 3, entry: -1, variant: 4},
+	{fileName: "group_head_pressure.png", caption: "Pressure test: espresso strong enough to rename the cat", source: "demo", repair: 5, entry: 1, variant: 5},
+	{fileName: "water_damage_residue.png", caption: "Residue on the right-channel board; the left channel declined comment", source: "demo", repair: 6, entry: 0, variant: 6},
 	// Bulk-pack samples: intake photos and bench evidence on generated repairs.
-	{fileName: "bulk intake laptop (DEMO).png", caption: "Intake photo from the bulk demo pack (synthetic)", source: "demo", repair: 8, entry: -1, variant: 7},
-	{fileName: "bulk bench phone (DEMO).png", caption: "Bench evidence from the bulk demo pack (synthetic)", source: "demo", repair: 12, entry: 0, variant: 8},
-	{fileName: "bulk intake console (DEMO).png", caption: "Intake photo from the bulk demo pack (synthetic)", source: "demo", repair: 17, entry: -1, variant: 9},
+	{fileName: "bulk_intake_laptop.png", caption: "Bulk intake: another Tuesday, another mystery", source: "demo", repair: 8, entry: -1, variant: 7},
+	{fileName: "bulk_bench_phone.png", caption: "Bench evidence: phone and technician both still booting", source: "demo", repair: 12, entry: 0, variant: 8},
+	{fileName: "bulk_intake_console.png", caption: "Console intake: it has seen things", source: "demo", repair: 17, entry: -1, variant: 9},
 }
 
 // demoPNG renders a deterministic synthetic "photo": a labeled-looking
@@ -82,7 +82,7 @@ trailer << /Root 1 0 R >>
 // demoFirmware is a synthetic binary blob (clearly not a real dump).
 func demoFirmware() []byte {
 	out := []byte{0x7f, 'E', 'L', 'F', 0x02, 0x01, 0x01, 0x00}
-	out = append(out, []byte("REPAIRFLOW DEMO FIRMWARE (SYNTHETIC)")...)
+	out = append(out, []byte("REPAIRFLOW SAMPLE FIRMWARE (SYNTHETIC)")...)
 	for i := 0; i < 256; i++ {
 		out = append(out, byte((i*37+11)%256))
 	}

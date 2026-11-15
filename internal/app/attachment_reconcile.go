@@ -2,6 +2,9 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"io"
 	"strconv"
 
 	"repairflow/internal/errs"
@@ -16,19 +19,21 @@ func (s *Service) ReconcileAttachments(ctx context.Context) (missing, orphans []
 		return nil, nil, err
 	}
 	rows, err := s.q(ctx).QueryContext(ctx,
-		`SELECT repair_id, storage_name FROM attachments WHERE state != 'purged'`)
+		`SELECT repair_id, storage_name, size_bytes, sha256 FROM attachments WHERE state != 'purged'`)
 	if err != nil {
 		return nil, nil, errs.Wrap(errs.CodeInternal, err, "cannot list attachment records")
 	}
 	type ref struct {
 		repair int64
 		name   string
+		size   int64
+		sha256 string
 	}
 	known := map[string]bool{}
 	var refs []ref
 	for rows.Next() {
 		var r ref
-		if err := rows.Scan(&r.repair, &r.name); err != nil {
+		if err := rows.Scan(&r.repair, &r.name, &r.size, &r.sha256); err != nil {
 			_ = rows.Close()
 			return nil, nil, errs.Wrap(errs.CodeInternal, err, "cannot read attachment record")
 		}
@@ -47,12 +52,25 @@ func (s *Service) ReconcileAttachments(ctx context.Context) (missing, orphans []
 			missing = append(missing, formatRef(r.repair, r.name))
 			continue
 		}
-		exists, err := store.Exists(r.repair, r.name)
+		f, err := store.Open(r.repair, r.name)
 		if err != nil {
+			if errs.CodeOf(err) == errs.CodeNotFound {
+				missing = append(missing, formatRef(r.repair, r.name))
+				continue
+			}
 			return nil, nil, err
 		}
-		if !exists {
-			missing = append(missing, formatRef(r.repair, r.name))
+		h := sha256.New()
+		n, readErr := io.Copy(h, f)
+		closeErr := f.Close()
+		if readErr != nil {
+			return nil, nil, errs.Wrap(errs.CodeInternal, readErr, "cannot read attachment bytes %s", formatRef(r.repair, r.name))
+		}
+		if closeErr != nil {
+			return nil, nil, errs.Wrap(errs.CodeInternal, closeErr, "cannot close attachment bytes %s", formatRef(r.repair, r.name))
+		}
+		if n != r.size || hex.EncodeToString(h.Sum(nil)) != r.sha256 {
+			missing = append(missing, formatRef(r.repair, r.name)+" (content mismatch)")
 		}
 	}
 	// Orphans: stored files that no live row references.
@@ -159,6 +177,28 @@ func scanAttachmentRow(rows interface {
 	a.storageName = storageName
 	a.EntryIDs = []int64{}
 	return a, nil
+}
+
+// repairAttachmentEntryIDs reads every attachment→entry link of one repair in a
+// single query: the gallery used to run one query per attachment.
+func (s *Service) repairAttachmentEntryIDs(ctx context.Context, repairID int64) (map[int64][]int64, error) {
+	rows, err := s.q(ctx).QueryContext(ctx,
+		`SELECT l.attachment_id, l.entry_id FROM attachment_links l
+		 JOIN attachments a ON a.id = l.attachment_id
+		 WHERE a.repair_id = ? ORDER BY l.attachment_id ASC, l.entry_id ASC`, repairID)
+	if err != nil {
+		return nil, errs.Wrap(errs.CodeInternal, err, "cannot list attachment links")
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[int64][]int64{}
+	for rows.Next() {
+		var attachmentID, entryID int64
+		if err := rows.Scan(&attachmentID, &entryID); err != nil {
+			return nil, errs.Wrap(errs.CodeInternal, err, "cannot read attachment link")
+		}
+		out[attachmentID] = append(out[attachmentID], entryID)
+	}
+	return out, rows.Err()
 }
 
 func (s *Service) attachmentEntryIDs(ctx context.Context, id int64) ([]int64, error) {

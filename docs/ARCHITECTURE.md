@@ -54,6 +54,7 @@ The main runtime dependencies are `modernc.org/sqlite`, `golang.org/x/crypto` fo
 - Estimates are immutable snapshots of active part lines. Accepting one supersedes the previously
   accepted estimate.
 - Rounding is deterministic integer half-up. Amount discounts above the subtotal are refused.
+- The web repair page does not expose estimates; CLI/API commands remain for compatibility.
 - Estimates are not payments. No payment, settlement, inventory or tax-invoice ledger exists.
 
 ### Attachments and retention
@@ -69,7 +70,8 @@ The main runtime dependencies are `modernc.org/sqlite`, `golang.org/x/crypto` fo
 ### Intake, accounts and demo data
 
 - Customer and repair creation accept an optional idempotency key. An identical retry replays the
-  original result; reusing the key with a different payload conflicts.
+  original result; reusing the key with a different payload conflicts. Customer fingerprints bind
+  every create field, including address.
 - Accounts use Argon2id password hashes and admin, technician or viewer roles. Sessions are hashed,
   expiring and revocable; password and active-state changes revoke affected sessions.
 - Demo records are synthetic and cannot be seeded over business records. Reset requires a valid
@@ -92,21 +94,27 @@ or configuration created by a newer schema version is refused rather than downgr
 | v7 `contact_device_parity` | Customer address and structured device fields |
 | v8 `drop_legacy_ticket_id` | Removal of the obsolete legacy identifier |
 | v9 `repair_customer_optional` | Nullable repair customer for unassigned intake |
+| v10 `label_printer` | One workspace-wide label-printer choice; empty driver means printing is off |
 
 `schema_migrations` tracks applied versions. `doctor` runs database integrity and foreign-key checks
-and reconciles attachment metadata with stored bytes. Revisions are derived from current content,
-not stored as independent version numbers.
+and hash-verifies every retained attachment against its stored size and SHA-256, reporting missing
+bytes or changed content. Revisions are derived from current content, not stored as independent
+version numbers.
 
 ## Workspace and failure handling
 
 A workspace contains `config.toml`, `data/repairflow.db`, `files/`, `backups/`, `logs/`, `cache/`
 and `run/`. Configuration is strict and is not silently rewritten. User-supplied filenames are
-metadata, never storage paths. The workspace-owning OS account is the outer trust boundary.
+metadata, never storage paths. The workspace-owning OS account is the outer trust boundary. The
+default executable is `/usr/local/bin/repairflow`, root-owned so a regular user can execute but not
+replace it; the workspace itself remains owned by the operator.
 
 The filesystem and SQLite cannot commit atomically together. Upload staging and `doctor`
 reconciliation expose missing or orphaned bytes. Backups combine a consistent `VACUUM INTO` database
-snapshot with hash-verified original files; restore verifies the complete archive before publishing
-it into an empty destination.
+snapshot with hash-verified original files. Verification and restore share archive membership,
+size/hash, database integrity/schema/attachment and configuration validation. Verification extracts
+only the database and config temporarily; restore stages all payloads before publishing into an
+empty destination. Local translation overrides are not archived.
 
 Attachment purge and demo reset use a cross-process workspace lock and same-filesystem recovery
 links under `files/.purge/`. Original bytes are preserved until the database transaction commits,
@@ -114,10 +122,11 @@ restored on rollback and recovered after interruption. Cleanup never removes tho
 
 Updates authenticate and verify the artifact before installation. The updater requires regular
 files, stages and re-hashes `<executable>.new`, preserves `<executable>.prev`, verifies the published
-target and health-checks the verified bytes. Replacement or health-check failure rolls back. Verified
-apply is Linux-only; unsigned builds and downgrades are refused. The optional
-`scripts/update-github.sh` downloads and safely extracts the exact architecture archive for a GitHub
-release tag, then hands the verified local binary and signed manifest to this same path; the
+target and health-checks the verified bytes. Replacement or health-check failure rolls back. Updates
+share an executable lock with the source installer and re-read the installed version while locked;
+replacing a root-owned `/usr/local/bin/repairflow` requires `sudo`/`doas`. Verified apply is Linux-only; unsigned builds and downgrades are refused. The
+optional `scripts/update-github.sh` downloads and safely extracts the exact architecture archive for
+a GitHub release tag, then hands the verified local binary and signed manifest to this same path; the
 application performs no background update checks.
 
 Errors use stable codes from `internal/errs`. Expected validation, permission, conflict and

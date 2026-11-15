@@ -31,7 +31,7 @@ func scanRepair(row rowScanner) (Repair, error) {
 }
 
 func repairRevision(t Repair) string {
-	return revision(t.DeviceType, t.Brand, t.Model, t.Serial, t.Issue, t.Stage, t.Notes)
+	return revision(t.DeviceType, t.Brand, t.Model, t.Serial, t.Issue, t.Stage, t.Notes, strconv.FormatInt(t.CustomerID, 10))
 }
 
 func deviceDisplay(deviceType, brand, model string) string {

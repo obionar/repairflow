@@ -11,10 +11,11 @@ import (
 // Bounded in-process login throttling. This complements Argon2id and the
 // uniform login error; it is not a distributed rate limiter.
 const (
-	loginFailureLimit = 5
-	loginWindow       = 15 * time.Minute
-	loginLockout      = 15 * time.Minute
-	maxThrottleKeys   = 4096
+	loginFailureLimit           = 5
+	loginWindow                 = 15 * time.Minute
+	loginLockout                = 15 * time.Minute
+	maxThrottleKeys             = 4096
+	maxConcurrentPasswordChecks = 2
 )
 
 type throttleEntry struct {

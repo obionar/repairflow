@@ -1,6 +1,8 @@
 package web
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"net/http"
 	"strconv"
@@ -9,6 +11,17 @@ import (
 	"repairflow/internal/app"
 	"repairflow/internal/errs"
 )
+
+// newIdempotencyKey gives one form draft a stable retry key. It is generated
+// server-side so the browser needs no JavaScript and a double submit or a
+// retried request replays instead of creating a duplicate record.
+func newIdempotencyKey() string {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err == nil {
+		return hex.EncodeToString(raw[:])
+	}
+	return ""
+}
 
 // draftable reports whether an operation error should return the operator to
 // the same form with the draft intact (validation/conflict), rather than the

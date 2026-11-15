@@ -36,6 +36,18 @@ func (s *Server) loginSubmit(w http.ResponseWriter, r *http.Request) {
 			"too many failed sign-in attempts; try again later"), http.StatusTooManyRequests)
 		return
 	}
+	// Bound the expensive Argon2 work as well as recording failures. Without
+	// this, a burst of requests can all pass the throttle before the first
+	// failure is recorded and exhaust memory on a small host.
+	select {
+	case s.loginWork <- struct{}{}:
+		defer func() { <-s.loginWork }()
+	default:
+		w.Header().Set("Retry-After", "5")
+		s.renderError(w, r, nil, errs.New(errs.CodePermission,
+			"sign-in is busy; try again shortly"), http.StatusTooManyRequests)
+		return
+	}
 	_, token, err := s.svc.Login(r.Context(), username, r.FormValue("password"))
 	if err != nil {
 		if errs.CodeOf(err) == errs.CodeInternal {
@@ -96,7 +108,46 @@ func (s *Server) publicView(w http.ResponseWriter, r *http.Request, titleKey, me
 }
 
 func (s *Server) settings(w http.ResponseWriter, r *http.Request, sess app.Session) {
-	s.render(w, r, "settings", "settings.title", sess, nil)
+	notice := ""
+	if r.URL.Query().Get("printer") == "tested" {
+		notice = s.pageTitle(r, "settings.printer_test_sent")
+	}
+	s.renderSettings(w, r, sess, "", notice, http.StatusOK)
+}
+
+// renderSettings renders the settings page with an optional flash line after a
+// rejected form or a successful test print.
+func (s *Server) renderSettings(w http.ResponseWriter, r *http.Request, sess app.Session, message, notice string, status int) {
+	settings, err := s.svc.LabelPrinter(r.Context())
+	if err != nil {
+		s.renderError(w, r, sessView(sess), err, statusOf(err))
+		return
+	}
+	s.renderPage(w, r, "settings", "settings.title", sess, message, notice, map[string]any{
+		"Printer": settings, "PrinterDrivers": app.LabelPrinterDrivers,
+	}, status)
+}
+
+// settingsPrinter stores the workspace label printer. It is administrator-only
+// because it changes the machine's hardware setup for every operator.
+func (s *Server) settingsPrinter(w http.ResponseWriter, r *http.Request, sess app.Session) {
+	if _, err := s.svc.SetLabelPrinter(r.Context(), sess.Role, r.FormValue("driver")); err != nil {
+		s.renderSettings(w, r, sess, s.flashText(r, err), "", statusOf(err))
+		return
+	}
+	http.Redirect(w, r, "/settings", http.StatusSeeOther)
+}
+
+// settingsPrinterTest prints one test label through the configured printer.
+func (s *Server) settingsPrinterTest(w http.ResponseWriter, r *http.Request, sess app.Session) {
+	if _, err := s.svc.PrintTestLabel(r.Context(), sess.Role); err != nil {
+		// The driver's message tells the operator what to fix; it is not an
+		// internal detail.
+		s.renderSettings(w, r, sess, err.Error(), "", statusOf(err))
+		return
+	}
+	// Redirect, so a refresh shows the page instead of printing a second label.
+	http.Redirect(w, r, "/settings?printer=tested", http.StatusSeeOther)
 }
 
 // settingsLanguage stores the browser language override. The workspace

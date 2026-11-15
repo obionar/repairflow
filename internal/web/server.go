@@ -40,6 +40,7 @@ type Server struct {
 	authRequired          bool
 	loopbackOnly          bool
 	loginLimit            *loginThrottle
+	loginWork             chan struct{}
 	loginBodyBytes        int64
 	formBodyBytes         int64
 	attachmentBodyBytes   int64
@@ -63,6 +64,7 @@ func New(svc *app.Service) (*Server, error) {
 	}
 	return &Server{svc: svc, tmpl: tmpl, logger: logging.New(false, os.Stderr).With("component", "web"),
 		tr: tr, language: "en", authRequired: true, loginLimit: newLoginThrottle(),
+		loginWork:      make(chan struct{}, maxConcurrentPasswordChecks),
 		loginBodyBytes: defaultLoginBodyBytes, formBodyBytes: defaultFormBodyBytes,
 		attachmentBodyBytes: defaultAttachmentBodyBytes,
 		loginReadTimeout:    defaultLoginReadTimeout, formReadTimeout: defaultFormReadTimeout,
@@ -107,8 +109,14 @@ const contentSecurityPolicy = "default-src 'self'; img-src 'self'; style-src 'se
 
 func templateFuncs() template.FuncMap {
 	return template.FuncMap{
-		"cents":         app.FormatCents,
-		"milli":         app.FormatQuantityMilli,
+		"cents": app.FormatCents,
+		"milli": app.FormatQuantityMilli,
+		"pcs": func(m int64) string {
+			if m%1000 == 0 {
+				return strconv.FormatInt(m/1000, 10)
+			}
+			return app.FormatQuantityMilli(m)
+		},
 		"lineTotal":     func(q, p int64) string { return app.FormatCents(app.LineTotalCents(q, p)) },
 		"humanize":      humanize,
 		"stageLabel":    humanize,
@@ -265,6 +273,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /repairs/{id}/archive", s.authed(s.repairArchive, app.RoleTechnician))
 	mux.HandleFunc("POST /repairs/{id}/unarchive", s.authed(s.repairUnarchive, app.RoleTechnician))
 	mux.HandleFunc("POST /repairs/{id}/stage", s.authed(s.repairStage, app.RoleTechnician))
+	mux.HandleFunc("POST /repairs/{id}/label", s.authed(s.repairLabel, app.RoleTechnician))
 	mux.HandleFunc("POST /repairs/{id}/entries", s.authed(s.repairEntryAdd, app.RoleTechnician))
 	mux.HandleFunc("POST /repairs/{id}/entries/{eid}/edit", s.authed(s.repairEntryEdit, app.RoleTechnician))
 	mux.HandleFunc("POST /repairs/{id}/entries/{eid}/delete", s.authed(s.repairEntryDelete, app.RoleTechnician))
@@ -274,8 +283,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /repairs/{id}/parts/{pid}", s.authed(s.repairPartUpdate, app.RoleTechnician))
 	mux.HandleFunc("POST /repairs/{id}/parts/{pid}/remove", s.authed(s.repairPartRemove, app.RoleTechnician))
 	mux.HandleFunc("POST /repairs/{id}/parts/{pid}/restore", s.authed(s.repairPartRestore, app.RoleTechnician))
-	mux.HandleFunc("POST /repairs/{id}/estimates", s.authed(s.estimateCreate, app.RoleTechnician))
-	mux.HandleFunc("POST /repairs/{id}/estimates/{eid}/accept", s.authed(s.estimateAccept, app.RoleTechnician))
 
 	mux.HandleFunc("POST /repairs/{id}/attachments", s.authed(s.attachmentAdd, app.RoleTechnician))
 	mux.HandleFunc("GET /attachments/{id}/download", s.authed(s.attachmentDownload, app.RoleViewer))
@@ -289,6 +296,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /settings", s.authed(s.settings, app.RoleViewer))
 	mux.HandleFunc("POST /settings/password", s.authed(s.settingsPassword, app.RoleViewer))
 	mux.HandleFunc("POST /settings/language", s.authed(s.settingsLanguage, app.RoleViewer))
+	mux.HandleFunc("POST /settings/printer", s.authed(s.settingsPrinter, app.RoleAdmin))
+	mux.HandleFunc("POST /settings/printer/test", s.authed(s.settingsPrinterTest, app.RoleAdmin))
 	return s.middleware(mux)
 }
 

@@ -10,6 +10,8 @@ point for any coding agent; the detailed contracts are under `docs/`.
 make verify                 # gofmt check, vet and the Go test suite
 make build                  # static linux/amd64 binary named repairflow
 ./scripts/run-demo.sh       # disposable synthetic workspace on 127.0.0.1:8091
+./demo/run-demo.sh          # same demo from the public demo/ directory
+./demo/dev.sh               # persistent demo workspace for development
 ./scripts/verify-all.sh     # full local gate; --with-fuzz adds bounded fuzzing
 ```
 
@@ -45,6 +47,7 @@ contributions are welcome, but do not describe them as supported.
 | Workspace layout and disposable cleanup | `internal/workspace` |
 | systemd/OpenRC service units | `internal/service` |
 | Synthetic demo data | `internal/seed` |
+| Public demo launchers | `demo/` (temporary or persistent synthetic workspace) |
 | Public contracts | `docs/CLI-CONTRACT.md`, `docs/ARCHITECTURE.md` (Schema) |
 | Domain invariants | `docs/ARCHITECTURE.md` |
 | Build, tests and debugging | `docs/DEVELOPMENT.md` |
@@ -60,8 +63,9 @@ contributions are welcome, but do not describe them as supported.
 - Add schema changes only as new numbered, transactional migrations. Keep backup formats, original
   bytes and existing records stable.
 - Use integer cents for money and integer milli-quantities for parts. Estimates are not payments.
-- Follow the existing ownership boundaries: business rules in `internal/app`, SQL only in `internal/db`,
-  files only in `internal/files`, presentation in `internal/cli` and `internal/web`.
+- Follow the existing ownership boundaries: business rules and domain SQL/transactions in
+  `internal/app`, SQLite connection/schema/integrity in `internal/db`, files only in `internal/files`,
+  presentation in `internal/cli` and `internal/web`.
 - Add a regression test before fixing behavior. Prove failure paths with disposable workspaces and
   fault injection, not by weakening a check.
 - Keep the public tree free of internal plans, verification logs, unreviewed screenshots, UI-parity
@@ -88,9 +92,11 @@ Do not invent deployment steps. Follow:
 - `docs/USAGE.md` — daily web/CLI workflows, attachments, languages, backup/restore and diagnostics.
 
 The binary must live at a stable path before `service install`; the unit pins its absolute path.
+The default install is `/usr/local/bin/repairflow`, owned by root so a regular user can execute but
+not replace it; workspaces remain at `~/.repairflow` unless `--home`/`REPAIRFLOW_HOME` is used.
 A real deployment needs a verified backup and explicit owner authorization. Unsigned builds cannot
-use `update apply`; that refusal is deliberate. Release bundles must include `LICENSE`; run
-`make license-check` before packaging.
+use `update apply`; that refusal is deliberate. Replacing a root-owned installation requires
+`doas`/`sudo`. Release bundles must include `LICENSE`; run `make license-check` before packaging.
 
 ## Skills
 

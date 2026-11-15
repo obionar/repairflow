@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -357,6 +358,9 @@ func TestArchiveLifecycleInWeb(t *testing.T) {
 	}
 
 	repairPath := "/repairs/" + itoaLocal(repair.ID)
+	if page := f.get(repairPath, tech); strings.Contains(page, "ticket-archive") {
+		t.Fatal("active repair page must not expose the archive button")
+	}
 	if rec := f.post(repairPath+"/archive", tech, url.Values{"csrf_token": {csrf}}); rec.Code != http.StatusSeeOther {
 		t.Fatalf("archive repair: %d %s", rec.Code, rec.Body.String())
 	}
@@ -438,7 +442,7 @@ func TestFullWebWorkflow(t *testing.T) {
 		}
 	}
 
-	// Entry + stage + part + estimate.
+	// Entry + status + part.
 	if rec := f.post("/repairs/1/entries", tech, url.Values{
 		"kind": {"work"}, "body": {"web entry"}, "csrf_token": {csrf},
 	}); rec.Code != http.StatusSeeOther {
@@ -450,21 +454,19 @@ func TestFullWebWorkflow(t *testing.T) {
 		t.Fatalf("stage: %d", rec.Code)
 	}
 	if rec := f.post("/repairs/1/parts", tech, url.Values{
-		"description": {"Screen"}, "quantity": {"1.5"}, "unit": {"pcs"},
+		"description": {"Screen"}, "quantity": {"2"},
 		"unit_price": {"10.00"}, "csrf_token": {csrf},
 	}); rec.Code != http.StatusSeeOther {
 		t.Fatalf("part: %d", rec.Code)
 	}
-	if rec := f.post("/repairs/1/estimates", tech, url.Values{
-		"note": {"web estimate"}, "discount_percent": {"10"}, "csrf_token": {csrf},
-	}); rec.Code != http.StatusSeeOther {
-		t.Fatalf("estimate: %d", rec.Code)
-	}
 	page := f.get("/repairs/1", tech)
-	for _, want := range []string{"web entry", "in_progress", "Screen", "estimate", "pickup-heading", "activity-heading", "not collected"} {
+	for _, want := range []string{"web entry", "in_progress", "Screen", "pickup-heading", "activity-heading", "not collected", "Status", `value="in_progress" selected`} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("repair page missing %q after mutations (truncated render?)", want)
 		}
+	}
+	if strings.Contains(page, "id=\"ticket-archive\"") || strings.Contains(page, "estimates-panel") {
+		t.Fatal("removed archive/estimate controls must not be rendered")
 	}
 	if strings.Contains(page, "internal rendering error") {
 		t.Fatal("template execution failed mid-page")
@@ -643,14 +645,14 @@ func TestRepairDetailsEdit(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec := f.post("/repairs/"+itoaLocal(tk.ID), tech, url.Values{
-		"device": {"Edited device"}, "issue": {"Edited issue"}, "notes": {"Edited notes"},
+		"device": {"Edited device"}, "issue": {"Edited issue"},
 		"revision": {detail.Revision}, "csrf_token": {csrf},
 	})
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("repair details edit: %d %s", rec.Code, rec.Body.String())
 	}
 	page := f.get("/repairs/"+itoaLocal(tk.ID), tech)
-	for _, want := range []string{"Edited device", "Edited issue", "Edited notes"} {
+	for _, want := range []string{"Edited device", "Edited issue"} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("repair page missing %q after details edit", want)
 		}
@@ -732,13 +734,13 @@ func TestRepairDraftRetainedOnValidation(t *testing.T) {
 
 	rec := f.post("/repairs/new", tech, url.Values{
 		"customer_id": {strconv.FormatInt(c.ID, 10)}, "device": {""}, "issue": {"draft issue"},
-		"notes": {"draft notes"}, "csrf_token": {csrf},
+		"csrf_token": {csrf},
 	})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("validation must return the form with 400, got %d", rec.Code)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"draft issue", "draft notes", "device must not be empty"} {
+	for _, want := range []string{"draft issue", "device must not be empty"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("repair draft response missing %q", want)
 		}
@@ -766,14 +768,14 @@ func TestRepairConflictReviewAndEntryDraft(t *testing.T) {
 	}
 
 	rec := f.post("/repairs/"+strconv.FormatInt(tk.ID, 10), tech, url.Values{
-		"device": {"Draft Device"}, "issue": {"Draft issue"}, "notes": {"Draft notes"},
+		"device": {"Draft Device"}, "issue": {"Draft issue"},
 		"revision": {oldRevision}, "csrf_token": {csrf},
 	})
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("stale repair update must return 409, got %d", rec.Code)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"Draft Device", "Draft notes", "Current saved values", "Other Device"} {
+	for _, want := range []string{"Draft Device", "Current saved values", "Other Device"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("repair conflict response missing %q", want)
 		}
@@ -784,7 +786,7 @@ func TestRepairConflictReviewAndEntryDraft(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec = f.post("/repairs/"+strconv.FormatInt(tk.ID, 10), tech, url.Values{
-		"device": {"Draft Device"}, "issue": {"Draft issue"}, "notes": {"Draft notes"},
+		"device": {"Draft Device"}, "issue": {"Draft issue"},
 		"revision": {current.Revision}, "csrf_token": {csrf},
 	})
 	if rec.Code != http.StatusSeeOther {
@@ -851,42 +853,37 @@ func TestEntryRevisionHistoryAndRestore(t *testing.T) {
 	}
 }
 
-func TestEstimateAcceptInWeb(t *testing.T) {
+func TestPickupUsesServerTimeAndNoDateControl(t *testing.T) {
 	f := newWeb(t)
 	tech := f.login("tech", "password12345")
 	csrf := f.csrfFor(tech)
-	c, err := f.svc.CreateCustomer(context.Background(), "setup", app.CustomerInput{Name: "Quote Owner"})
+	ctx := context.Background()
+	c, err := f.svc.CreateCustomer(ctx, "setup", app.CustomerInput{Name: "Pickup Owner"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	tk, err := f.svc.CreateRepair(context.Background(), "setup", app.RepairInput{
-		CustomerID: c.ID, Device: "Quote Device", Issue: "Quote issue",
-	})
+	tk, err := f.svc.CreateRepair(ctx, "setup", app.RepairInput{CustomerID: c.ID, Device: "Pickup Device", Issue: "Pickup issue"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.svc.AddRepairPart(context.Background(), "setup", tk.ID, app.PartInput{
-		Description: "Replacement screen", QuantityMilli: 1000, Unit: "pcs", UnitPriceCents: 8499,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	estimate, err := f.svc.CreateEstimate(context.Background(), "setup", tk.ID, app.EstimateInput{})
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	path := "/repairs/" + strconv.FormatInt(tk.ID, 10)
-	page := f.get(path, tech)
-	if !strings.Contains(page, "Line items") || !strings.Contains(page, "Replacement screen") {
-		t.Fatal("estimate line details must be available in the web UI")
+	if page := f.get(path, tech); strings.Contains(page, "pickup_at") {
+		t.Fatal("pickup form must not ask for a date")
 	}
-	rec := f.post(path+"/estimates/"+strconv.FormatInt(estimate.ID, 10)+"/accept", tech, url.Values{"csrf_token": {csrf}})
+	before := time.Now().UTC().Add(-2 * time.Second)
+	rec := f.post(path+"/pickup", tech, url.Values{
+		"picked_up_by": {"A Punctual Person"}, "pickup_notes": {"Handed over"}, "csrf_token": {csrf},
+	})
 	if rec.Code != http.StatusSeeOther {
-		t.Fatalf("accept estimate: %d %s", rec.Code, rec.Body.String())
+		t.Fatalf("pickup: %d %s", rec.Code, rec.Body.String())
 	}
-	page = f.get(path, tech)
-	if !strings.Contains(page, "accepted") {
-		t.Fatal("accepted estimate must be visible on the repair page")
+	got, err := f.svc.GetRepairRow(ctx, tk.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	when, err := time.Parse(time.RFC3339, got.PickupAt)
+	if err != nil || when.Before(before) || when.After(time.Now().UTC().Add(2*time.Second)) {
+		t.Fatalf("pickup time was not set to server time: %q (%v)", got.PickupAt, err)
 	}
 }
 
@@ -914,7 +911,7 @@ func TestPartLifecycleInWeb(t *testing.T) {
 	partPath := path + "/parts/" + strconv.FormatInt(part.ID, 10)
 
 	rec := f.post(partPath, tech, url.Values{
-		"description": {"Edited screen"}, "quantity": {"1.5"}, "unit": {"pcs"},
+		"description": {"Edited screen"}, "quantity": {"2"},
 		"unit_cost": {"10.00"}, "unit_price": {"84.99"},
 		"revision": {part.Revision}, "csrf_token": {csrf},
 	})
@@ -922,7 +919,7 @@ func TestPartLifecycleInWeb(t *testing.T) {
 		t.Fatalf("part edit: %d %s", rec.Code, rec.Body.String())
 	}
 	page := f.get(path, tech)
-	if !strings.Contains(page, "Edited screen") || !strings.Contains(page, "127.49") {
+	if !strings.Contains(page, "Edited screen") || !strings.Contains(page, "169.98") {
 		t.Fatalf("edited part/total not rendered: %s", page)
 	}
 
@@ -999,7 +996,7 @@ func TestAttachmentLifecycleInWeb(t *testing.T) {
 	}
 }
 
-func TestPartAndEstimateDraftsRetained(t *testing.T) {
+func TestPartDraftsRetained(t *testing.T) {
 	f := newWeb(t)
 	tech := f.login("tech", "password12345")
 	csrf := f.csrfFor(tech)
@@ -1035,6 +1032,14 @@ func TestPartAndEstimateDraftsRetained(t *testing.T) {
 		}
 	}
 
+	// Fractional pieces are refused by the simplified web form.
+	rec = f.post(path+"/parts", tech, url.Values{
+		"description": {"Half a part"}, "quantity": {"1.5"}, "unit_price": {"10.00"}, "csrf_token": {csrf},
+	})
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "whole number of pieces") {
+		t.Fatalf("fractional quantity must be refused: %d", rec.Code)
+	}
+
 	// Invalid edit: preserve the submitted values in that part's disclosure.
 	rec = f.post(path+"/parts/"+strconv.FormatInt(part.ID, 10), tech, url.Values{
 		"description": {"Edited draft"}, "quantity": {"bad"}, "unit": {"pcs"},
@@ -1046,17 +1051,6 @@ func TestPartAndEstimateDraftsRetained(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "Edited draft") || !strings.Contains(rec.Body.String(), `value="bad"`) {
 		t.Fatal("part edit draft must be retained")
-	}
-
-	// Invalid discount: preserve estimate fields.
-	rec = f.post(path+"/estimates", tech, url.Values{
-		"note": {"draft estimate"}, "discount_percent": {"101"}, "csrf_token": {csrf},
-	})
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("invalid estimate: %d", rec.Code)
-	}
-	if !strings.Contains(rec.Body.String(), "draft estimate") || !strings.Contains(rec.Body.String(), `value="101"`) {
-		t.Fatal("estimate draft must be retained")
 	}
 }
 
@@ -1318,5 +1312,184 @@ func TestLiveSearchReturnsOnlyResults(t *testing.T) {
 	}
 	if page := f.get("/customers", tech); strings.Contains(page, "id=\"search-submit\"") {
 		t.Fatal("the search button must be gone (submit stays sr-only)")
+	}
+}
+
+// TestAttachmentUploadSpillsToDisk pins that a file larger than the form-field
+// memory budget is streamed through the staging directory instead of being
+// buffered in RAM. This is the loopback no-authentication mode (the Pi demo and
+// LAN-test setup), where no earlier parse has already forced the spill — so the
+// upload handler alone decides. Proof is behavioural: with an unusable temp
+// directory the spill must fail. A multi-megabyte upload that succeeds there was
+// held in memory, which is an OOM on a small host, not a performance detail.
+func TestAttachmentUploadSpillsToDisk(t *testing.T) {
+	f := newWeb(t)
+	// Rebuild the handler without authentication, as `serve` does when
+	// web.auth_required=false.
+	srv, err := web.New(f.svc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.WithAuthentication(false)
+	handler := srv.Handler()
+
+	c, err := f.svc.CreateCustomer(context.Background(), "setup", app.CustomerInput{Name: "Spill Owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repair, err := f.svc.CreateRepair(context.Background(), "setup", app.RepairInput{
+		CustomerID: c.ID, Device: "Spill Device", Issue: "Spill issue",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	unusable := filepath.Join(t.TempDir(), "no-write")
+	if err := os.Mkdir(unusable, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions, so the spill cannot be forced to fail")
+	}
+	t.Setenv("TMPDIR", unusable)
+
+	// Larger than the 1 MiB form-field budget, so it must spill.
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	part, err := mw.CreateFormFile("file", "big.bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write(bytes.Repeat([]byte("x"), 4<<20)); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Close(t, mw)
+
+	req := httptest.NewRequest("POST", "http://web.test/repairs/"+strconv.FormatInt(repair.ID, 10)+"/attachments", &body)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.Header.Set("Origin", "http://web.test")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code == http.StatusSeeOther {
+		t.Fatal("a 4 MiB upload succeeded without a usable temp directory: the file was buffered in memory")
+	}
+}
+
+func TestOldCustomerPrefillsByID(t *testing.T) {
+	f := newWeb(t)
+	cookie := f.login("admin", "password12345")
+	ctx := context.Background()
+	var oldest app.Customer
+	for i := 0; i < 101; i++ {
+		c, err := f.svc.CreateCustomer(ctx, "setup", app.CustomerInput{Name: "Customer " + strconv.Itoa(i)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if i == 0 {
+			oldest = c
+		}
+	}
+	body := f.get("/repairs/new?customer_id="+strconv.FormatInt(oldest.ID, 10), cookie)
+	if !strings.Contains(body, `value="`+oldest.Name+`"`) {
+		t.Fatalf("direct customer_id did not prefill an older customer: %q", oldest.Name)
+	}
+	if !strings.Contains(body, `name="customer_id" value="`+strconv.FormatInt(oldest.ID, 10)+`"`) {
+		t.Fatalf("hidden customer_id missing for older customer")
+	}
+}
+
+func TestAmbiguousCustomerNameIsRefused(t *testing.T) {
+	f := newWeb(t)
+	cookie := f.login("tech", "password12345")
+	ctx := context.Background()
+	for _, phone := range []string{"111", "222"} {
+		if _, err := f.svc.CreateCustomer(ctx, "setup", app.CustomerInput{Name: "Same Name", Phone: phone}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rec := f.post("/repairs/new", cookie, url.Values{
+		"csrf_token": {f.csrfFor(cookie)}, "customer_name": {"Same Name"},
+		"device": {"Phone"}, "issue": {"Ambiguous"},
+	})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("ambiguous customer: status %d body %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "more than one customer") {
+		t.Fatalf("ambiguous refusal not shown: %s", rec.Body.String())
+	}
+	if page, err := f.svc.ListRepairs(ctx, app.RepairFilter{}); err != nil || page.Total != 0 {
+		t.Fatalf("ambiguous intake created a repair: %+v %v", page, err)
+	}
+}
+
+func TestCustomerRepairHistoryIsCompleteAndPaginated(t *testing.T) {
+	f := newWeb(t)
+	cookie := f.login("admin", "password12345")
+	ctx := context.Background()
+	c, err := f.svc.CreateCustomer(ctx, "setup", app.CustomerInput{Name: "History Owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var first app.Repair
+	for i := 1; i <= 55; i++ {
+		repair, err := f.svc.CreateRepair(ctx, "setup", app.RepairInput{
+			CustomerID: c.ID, Device: "Device " + strconv.Itoa(i), Issue: "Issue",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if i == 1 {
+			first = repair
+		}
+	}
+	if _, err := f.svc.ArchiveRepair(ctx, "setup", first.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	page1 := f.get("/customers/"+strconv.FormatInt(c.ID, 10), cookie)
+	if !strings.Contains(page1, `page=2`) || !strings.Contains(page1, "55") {
+		t.Fatalf("customer history is not paginated or total is missing")
+	}
+	page3 := f.get("/customers/"+strconv.FormatInt(c.ID, 10)+"?page=3", cookie)
+	if !strings.Contains(page3, "Device 1") || !strings.Contains(page3, "Archived") {
+		t.Fatalf("oldest archived repair missing from customer history")
+	}
+}
+
+func TestFormsCarryServerSideIdempotencyKeys(t *testing.T) {
+	f := newWeb(t)
+	cookie := f.login("tech", "password12345")
+	if page := f.get("/repairs/new", cookie); !strings.Contains(page, `name="idempotency_key"`) {
+		t.Fatal("repair form has no idempotency key")
+	}
+	if page := f.get("/customers/new", cookie); !strings.Contains(page, `name="idempotency_key"`) {
+		t.Fatal("customer form has no idempotency key")
+	}
+	ctx := context.Background()
+	customerKey := "web-customer-key-0001"
+	for i := 0; i < 2; i++ {
+		rec := f.post("/customers/new", cookie, url.Values{
+			"csrf_token": {f.csrfFor(cookie)}, "idempotency_key": {customerKey},
+			"name": {"Retry Customer"},
+		})
+		if rec.Code != http.StatusSeeOther {
+			t.Fatalf("customer submit %d: status %d body %s", i, rec.Code, rec.Body.String())
+		}
+	}
+	if page, err := f.svc.ListCustomers(ctx, app.CustomerFilter{Search: "Retry Customer"}); err != nil || page.Total != 1 {
+		t.Fatalf("customer retry created duplicates: %+v %v", page, err)
+	}
+	repairKey := "web-repair-key-0001"
+	for i := 0; i < 2; i++ {
+		rec := f.post("/repairs/new", cookie, url.Values{
+			"csrf_token": {f.csrfFor(cookie)}, "idempotency_key": {repairKey},
+			"customer_name": {"Retry Customer"}, "device": {"Phone"}, "issue": {"Retry"},
+		})
+		if rec.Code != http.StatusSeeOther {
+			t.Fatalf("repair submit %d: status %d body %s", i, rec.Code, rec.Body.String())
+		}
+	}
+	if page, err := f.svc.ListRepairs(ctx, app.RepairFilter{}); err != nil || page.Total != 1 {
+		t.Fatalf("repair retry created duplicates: %+v %v", page, err)
 	}
 }

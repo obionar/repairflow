@@ -156,6 +156,11 @@ func parseArgonParams(field string) (timeCost, memory uint32, threads uint8, ok 
 		case "t":
 			timeCost = uint32(n)
 		case "p":
+			// threads is uint8: refusing here keeps a malformed p (e.g. 320)
+			// from aliasing the valid p it truncates to.
+			if n > 255 {
+				return 0, 0, 0, false
+			}
 			threads = uint8(n)
 		}
 	}

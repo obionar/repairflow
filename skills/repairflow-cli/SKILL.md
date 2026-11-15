@@ -36,6 +36,25 @@ quantities accept three decimals. JSON stores integer cents and milli-quantities
 `--address`. Passwords are 6–256 characters; choose a longer one if the UI is reachable beyond
 loopback.
 
+## Repair labels
+
+Print the intake sticker from the CLI (the same action as the repair page button): the sticker
+carries the repair number and the customer name, so a device on the shelf can be matched to its
+page.
+
+```bash
+./repairflow printer show --home "$WS"            # {"driver":""} means off
+./repairflow printer set p15 --home "$WS"         # administrator setting, p15 or none
+./repairflow printer test --home "$WS"            # one test label
+./repairflow repair label ID --home "$WS"         # one sticker for that repair
+```
+
+The p15 driver must be installed on the host that runs RepairFlow (on `PATH` or at
+`/usr/local/bin/p15`) for the same user, with its daemon running. Printer density, label size and
+printer name live in `p15 config`, not in RepairFlow. A failed print exits `3` or `2` and is never
+retried automatically: the label may already be on paper, so check the printer before printing
+again. `repair label` also writes a `label` entry to the repair's activity trail.
+
 ## Contract
 
 - Machine calls use `--json`: `{ok,command,contract,data}` or `{error:{code,message}}` on stderr.
@@ -45,16 +64,22 @@ loopback.
   bytes and hash and never overwrite. Detach is recoverable; purge requires confirmation and the
   retention period. Purge/demo-reset deletes use write-ahead recovery links under `files/.purge/`;
   never delete those by hand. Only JPEG/PNG/WebP up to 8 MiB preview inline.
-- `backup create --output ABS/PATH`, `backup verify`, `restore` into an empty/new workspace only.
+- `backup create --output ABS/PATH`, `backup verify`, and `restore` into an empty/new workspace only.
+  Verify checks archive hashes and opens the database snapshot; a restore rehearsal is still the
+  full recovery proof.
 - Updates use signed manifests: `update check/apply/keygen/sign`. `update apply --file`
-  requires a regular local artifact; symlinks and FIFOs are refused. Signed apply is Linux-only.
-  `scripts/update-github.sh` optionally downloads the exact architecture archive for a public GitHub
-  release tag and reuses that verification path; it rejects unsafe archive paths and does not poll or
-  restart services automatically.
+  requires a regular local artifact; symlinks and FIFOs are refused. Signed apply is Linux-only and
+  takes a lock next to the executable. A root-owned `/usr/local/bin/repairflow` needs
+  `sudo`/`doas` for apply. `scripts/update-github.sh` optionally downloads the exact architecture
+  archive for a public GitHub release tag and reuses that verification path; it performs network and
+  verification work as the operator and may escalate only the local replacement. Pass only a
+  trusted installed binary.
 - `service install/status/remove` writes a systemd user unit or, on Alpine, an OpenRC script
   (`--init systemd|openrc|none`). `--name NAME` manages a second instance; a unit marked for another
-  instance is refused, not overwritten or removed.
-- `--debug` or `REPAIRFLOW_DEBUG=1` adds safe stderr diagnostics. `doctor` checks workspace health.
+  instance is refused, not overwritten or removed. An existing unit with no repairflow marker is
+  also refused rather than replaced.
+- `--debug` or `REPAIRFLOW_DEBUG=1` adds safe stderr diagnostics. `doctor` hash-verifies attachment
+  bytes, so it takes longer on a large gallery.
 - `--actor` is self-asserted audit metadata, not authentication.
 
 ## Safety

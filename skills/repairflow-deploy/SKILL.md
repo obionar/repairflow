@@ -40,10 +40,14 @@ scp repairflow_Linux_x86_64.tar.gz repairflow_Linux_arm64.tar.gz SHA256SUMS tech
 # on the target (both archives present: BusyBox sha256sum has no --ignore-missing)
 sha256sum -c SHA256SUMS
 tar -xzf repairflow_Linux_x86_64.tar.gz
-install -Dm0755 repairflow ~/.local/bin/repairflow
-install -Dm0755 update-github.sh ~/.local/bin/update-github.sh
-~/.local/bin/repairflow version
+sudo install -Dm0755 repairflow /usr/local/bin/repairflow
+sudo install -Dm0755 update-github.sh /usr/local/bin/update-github.sh
+/usr/local/bin/repairflow version
 ```
+
+On a `doas` host replace `sudo` with `doas`. The default `/usr/local/bin` is root-owned:
+a regular user can execute RepairFlow but cannot replace it. The workspace stays at
+`~/.repairflow` unless `--home`/`REPAIRFLOW_HOME` selects another path.
 
 The binary must live at a stable absolute path before installing a service: the systemd unit pins
 that path and offline updates stage `<exe>.new` beside it.
@@ -95,28 +99,32 @@ password hashes and are not encrypted by the application.
 Signed GitHub update (exact tag, check first, then apply):
 
 ```bash
-./update-github.sh --tag X.Y.Z --binary "$HOME/.local/bin/repairflow"
-./update-github.sh --tag X.Y.Z --binary "$HOME/.local/bin/repairflow" --apply
+./update-github.sh --tag X.Y.Z --binary /usr/local/bin/repairflow
+./update-github.sh --tag X.Y.Z --binary /usr/local/bin/repairflow --apply
 ```
 
 The POSIX script downloads the exact architecture archive, rejects unsafe paths, verifies the signed
-manifest and artifact hash/size, and leaves service restart to the operator. Install the archive's
-`update-github.sh` beside the binary. For an offline update, unpack the same archive and use the
-`manifest.json`, `manifest.sig` and `repairflow` it contains.
+manifest and artifact hash/size, and leaves service restart to the operator. It performs network and
+verification work as the operator and uses `doas`/`sudo` only for the local replacement when the
+binary directory is root-owned. Automatic escalation checks that the executable is a non-symlink
+regular file and that it and every parent are root-owned without group/world write permission
+(requires `stat`). Pass only a trusted installed binary as `--binary`.
 
 Signed offline update:
 
 ```bash
-repairflow update check --manifest manifest.json --signature manifest.sig
-repairflow update apply --file repairflow --manifest manifest.json \
+/usr/local/bin/repairflow update check --manifest manifest.json --signature manifest.sig
+sudo /usr/local/bin/repairflow update apply --file repairflow --manifest manifest.json \
   --signature manifest.sig --confirm
-repairflow service install          # re-pin the unit if the path changed
-repairflow doctor
+/usr/local/bin/repairflow service install          # re-pin the unit if the path changed
+/usr/local/bin/repairflow doctor --home /srv/repairflow
 ```
 
-Unsigned builds cannot use `update apply`; copy the binary and re-run `service install` instead.
-Never disable signature, hash, size or path checks to make an upgrade pass. Verified apply is
-Linux-only; other platforms must refuse.
+`update check` and `doctor` run as the operator; the root-owned replacement needs `sudo`/`doas`.
+The updater serializes on `<exe>.lock`; do not delete that file during an update. Unsigned builds
+cannot use `update apply`; copy the binary and re-run `service install` instead. Never disable
+signature, hash, size or path checks to make an upgrade pass. Verified apply is Linux-only; other
+platforms must refuse.
 
 ## Safety and limits
 
