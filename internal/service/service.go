@@ -726,7 +726,7 @@ func binaryPathWarning(binaryPath string) string {
 	for _, segment := range strings.Split(clean, string(os.PathSeparator)) {
 		switch segment {
 		case "Downloads", "downloads", "Desktop":
-			return "unit pins " + clean + " inside a download/desktop folder; move the binary to a stable path such as /usr/local/bin/repairflow"
+			return "unit pins " + clean + " inside a download/desktop folder; move the binary to a stable path such as ~/.local/bin/repairflow or /usr/local/bin/repairflow"
 		}
 	}
 	return ""

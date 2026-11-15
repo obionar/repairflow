@@ -233,18 +233,19 @@ architecture, extracts the signed manifest and binary, verifies the signature pl
 SHA-256/size, and does not change the installation by default:
 
 ```bash
-./update-github.sh --tag X.Y.Z --binary /usr/local/bin/repairflow
+./update-github.sh --tag X.Y.Z --binary ~/.local/bin/repairflow
 ```
 
 Apply only the reviewed candidate:
 
 ```bash
-./update-github.sh --tag X.Y.Z --binary /usr/local/bin/repairflow --apply
+./update-github.sh --tag X.Y.Z --binary ~/.local/bin/repairflow --apply
 ```
 
-The script performs download and signature verification as the operator, then
-uses `doas` or `sudo` for the local replacement when `/usr/local/bin` is
-root-owned. It never downloads or verifies as root. Automatic escalation refuses symlink
+The script performs download and signature verification as the operator. With the default
+`~/.local/bin` installation the replacement is written by that same account and no privilege is
+involved at any point. For a root-owned `/usr/local/bin/repairflow` it uses `doas` or `sudo` for the
+local replacement only, and never downloads or verifies as root. Automatic escalation refuses symlink
 executables, non-root ownership, or group/world write permission on the executable or any parent
 directory. Pass only the trusted installed binary as `--binary`; privilege executes that path as root.
 
@@ -260,12 +261,13 @@ A signed release archive contains `manifest.json`, `manifest.sig` and the `repai
 ```bash
 tar -xzf repairflow_Linux_x86_64.tar.gz
 repairflow update check --manifest manifest.json --signature manifest.sig
-sudo /usr/local/bin/repairflow update apply --file repairflow \
+repairflow update apply --file repairflow \
   --manifest manifest.json --signature manifest.sig --confirm
 ```
 
-The check can run as the operator. Replacing a root-owned `/usr/local/bin/repairflow`
-requires `sudo` or `doas`; the updater creates a lock next to the executable and
+The check can run as the operator. The default `~/.local/bin/repairflow` is writable by the same
+account, so the apply needs no privilege; replacing a root-owned `/usr/local/bin/repairflow` takes
+`sudo` or `doas`. The updater creates a lock next to the executable and
 refuses clearly when it lacks permission. The source installer shares that lock and requires `flock`.
 The updater re-reads the installed version while locked to reject a stale downgrade or re-apply. Do not remove `<exe>.lock` while an update
 is running.
@@ -292,7 +294,7 @@ Stop the service and replace the executable. If the executable path changed, rer
 ```bash
 # systemd
 systemctl --user stop repairflow.service
-sudo install -Dm0755 repairflow /usr/local/bin/repairflow
+install -Dm0755 repairflow ~/.local/bin/repairflow
 # If the path changed: repairflow service install --no-enable
 systemctl --user start repairflow.service
 
@@ -313,9 +315,11 @@ is still an open audit finding.
 repairflow service remove
 repairflow backup create --output /absolute/path/final-backup.rfbak
 repairflow backup verify /absolute/path/final-backup.rfbak
-sudo rm /usr/local/bin/repairflow /usr/local/bin/update-github.sh
-sudo rm -f /usr/local/bin/repairflow.lock
+rm ~/.local/bin/repairflow ~/.local/bin/update-github.sh
+rm -f ~/.local/bin/repairflow.lock
 ```
+
+For a `/usr/local/bin` installation, delete the same files there with `sudo` or `doas` instead.
 
 This removes the service and executable but leaves the workspace intact. The lock file is only
 created by an update and is safe to remove after the service is stopped; never remove it while an

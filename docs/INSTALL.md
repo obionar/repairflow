@@ -23,10 +23,11 @@ cd repairflow
 ```
 
 The source installer requires `flock` (util-linux or a BusyBox build with the applet enabled).
-It builds the binary and installs it to `/usr/local/bin/repairflow`; the
-installer uses `doas` or `sudo` for that one step when the target is root-owned.
-Set `REPAIRFLOW_PREFIX` to change the install root (for example
-`REPAIRFLOW_PREFIX=$HOME/.local` to install without privileges). To update, run
+It builds the binary and installs it to `~/.local/bin/repairflow`, a directory that belongs to the
+operator, so neither the install nor a later update needs privilege. Set
+`REPAIRFLOW_PREFIX=/usr/local` for the shared, root-owned layout instead: a regular user can then
+execute the binary but not replace it, and the installer uses `doas` or `sudo` for that one step.
+To update, run
 `git pull && ./install-repairflow` again: the binary is replaced atomically
 under the same executable lock as signed updates, existing workspaces and configuration are kept,
 and each workspace database migrates automatically on the next command or
@@ -44,16 +45,18 @@ Download both archives and `SHA256SUMS` from the GitHub release, then check them
 ```bash
 sha256sum -c SHA256SUMS
 tar -xzf repairflow_Linux_x86_64.tar.gz
-sudo install -Dm0755 repairflow /usr/local/bin/repairflow
-sudo install -Dm0755 update-github.sh /usr/local/bin/update-github.sh
-/usr/local/bin/repairflow version
+install -Dm0755 repairflow ~/.local/bin/repairflow
+install -Dm0755 update-github.sh ~/.local/bin/update-github.sh
+repairflow version
 ```
 
-On a host using `doas`, replace `sudo` with `doas`. `/usr/local/bin` is
-root-owned: a regular user can execute RepairFlow but cannot replace the
-binary. Keep that property when installing as root; do not make the directory
-writable by the service account. A signed update of this installation needs
-`sudo`/`doas` for the apply step; see [Deployment](DEPLOY.md).
+`install -D` creates `~/.local/bin` when it is missing, and nothing here needs privilege: the binary
+belongs to you, so a signed update replaces it without `sudo`. On a shared or multi-user host,
+install to `/usr/local/bin/repairflow` with `sudo` or `doas` instead: that directory is
+root-owned, so a regular user can execute RepairFlow but cannot replace the binary. Keep that
+property when installing that way; do not make the directory writable by the service account. A
+signed update of such an installation needs `sudo`/`doas` for the apply step; see
+[Deployment](DEPLOY.md).
 
 Checking the whole set keeps the command portable: Alpine's BusyBox `sha256sum` has no GNU
 `--ignore-missing`.
@@ -72,15 +75,15 @@ executable at a stable path: service units and updates refer to that location.
 
 ```bash
 make build
-sudo install -Dm0755 repairflow /usr/local/bin/repairflow
-/usr/local/bin/repairflow version
+install -Dm0755 repairflow ~/.local/bin/repairflow
+repairflow version
 ```
 
-If `/usr/local/bin` is not on `PATH`, call `/usr/local/bin/repairflow` directly
+If `~/.local/bin` is not on `PATH`, call `~/.local/bin/repairflow` directly
 or add this to your shell profile:
 
 ```bash
-export PATH="/usr/local/bin:$PATH"
+export PATH="$HOME/.local/bin:$PATH"
 ```
 
 The examples below use `repairflow` for readability.

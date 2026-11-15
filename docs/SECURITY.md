@@ -51,7 +51,8 @@ before storing sensitive customer data.
   checks, staged/published readback and a health check. Symlinks, FIFOs, unsigned builds, same-version
   installs and downgrades are refused. Updates and source installs share a lock next to the
   executable. Updates re-read the installed version under that lock before applying version policy.
-  Replacing a root-owned `/usr/local/bin/repairflow` requires `sudo`/`doas`.
+  Replacing a root-owned `/usr/local/bin/repairflow` requires `sudo`/`doas`; the default
+  `~/.local/bin/repairflow` belongs to the operator and needs neither.
 - The application makes no outbound network requests during ordinary use. The optional
   `scripts/update-github.sh` accesses GitHub only when the operator invokes it, extracts only the
   expected files from the platform archive, and still requires the installed binary to verify the
@@ -71,8 +72,10 @@ before storing sensitive customer data.
 running as that account can read or modify the database and attachments directly, bypassing web
 roles. Web roles are cooperative application permissions, not a sandbox between OS processes.
 
-The default executable is `/usr/local/bin/repairflow`, owned by root and executable by regular users.
-The installer uses `doas`/`sudo` only for the local replacement step; workspaces remain owned by the
+The default executable is `~/.local/bin/repairflow`, owned by the operator, so installing and
+updating it needs no privilege. `REPAIRFLOW_PREFIX=/usr/local` installs a root-owned binary that a
+regular user can execute but not replace; the installer then uses `doas`/`sudo` only for the local
+replacement step. Workspaces remain owned by the
 operator at the default `~/.repairflow` path or an explicit `--home`/`REPAIRFLOW_HOME`.
 
 CLI `--actor` and `$USER` are self-asserted audit labels, not authentication. Web audit actors come
