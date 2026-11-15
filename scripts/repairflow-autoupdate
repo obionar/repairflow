@@ -7,8 +7,13 @@
 # run never jumps to a release candidate. Set RF_UPDATE_TAG to pin one explicitly.
 set -eu
 home=${REPAIRFLOW_HOME:-$HOME/.repairflow}
-bin=$(command -v repairflow)
-fetch=$(command -v repairflow-update)
+# cron has a minimal PATH: resolve the binary once, with the default install dir as fallback.
+bin=${REPAIRFLOW_BIN:-$(command -v repairflow || true)}
+[ -n "$bin" ] || bin=$HOME/.local/bin/repairflow
+[ -x "$bin" ] || { echo "repairflow-autoupdate: repairflow not found (set REPAIRFLOW_BIN)" >&2; exit 1; }
+fetch=$(command -v repairflow-update || true)
+[ -n "$fetch" ] || fetch=$HOME/.local/bin/repairflow-update
+[ -x "$fetch" ] || { echo "repairflow-autoupdate: repairflow-update not found" >&2; exit 1; }
 state=$home/cache/update
 log=$home/logs/update.log
 mkdir -p "$state" "$home/logs"
