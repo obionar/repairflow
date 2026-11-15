@@ -58,6 +58,11 @@ writable by the service account. A signed update of this installation needs
 Checking the whole set keeps the command portable: Alpine's BusyBox `sha256sum` has no GNU
 `--ignore-missing`.
 
+Prereleases are never GitHub `latest`; fetch them by exact tag from the releases page (for example
+`…/releases/tag/v0.2.0-rc1`). Between prereleases there is **no migration promise**: a workspace may
+need to be recreated instead of migrated, and an older binary refuses a newer schema. Take a verified
+backup before opening a workspace with a newer binary.
+
 Use `repairflow_Linux_arm64.tar.gz` on ARM64. The archive also contains `LICENSE`, `manifest.json`
 and `manifest.sig`; keep the archive or those files with the installation to preserve the license and
 support offline verification. Keep the

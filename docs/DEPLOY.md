@@ -199,9 +199,10 @@ Always create and verify a backup first.
 ### Signed GitHub update
 
 After a verified backup, `update-github.sh` downloads the installable archive for the exact release
-tag from the public `obionar/repairflow` repository. It selects the current Linux architecture,
-extracts the signed manifest and binary, verifies the signature plus artifact SHA-256/size, and does
-not change the installation by default:
+tag from the public `obionar/repairflow` repository. The tag is exact because GitHub `latest` excludes
+prereleases: a prerelease such as `v0.2.0-rc1` must be named explicitly. It selects the current Linux
+architecture, extracts the signed manifest and binary, verifies the signature plus artifact
+SHA-256/size, and does not change the installation by default:
 
 ```bash
 ./update-github.sh --tag X.Y.Z --binary /usr/local/bin/repairflow
