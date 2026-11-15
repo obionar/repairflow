@@ -89,6 +89,34 @@ Two application limits apply behind the proxy — one shared login-throttle buck
 that cannot be marked `Secure`; see [Security](SECURITY.md#remote-access). Tailscale provides the outer
 network access control; RepairFlow authentication remains mandatory.
 
+### Trusted LAN, authentication on
+
+A single-owner instance on a trusted network can serve that network directly instead of using a
+tunnel. Bind the listener to the machine's own address, allow the Host header and keep
+authentication on:
+
+```toml
+# <workspace>/config.toml
+[web]
+host = "192.0.2.10"      # the machine's address on that network
+allow_remote = true
+auth_required = true
+```
+
+```bash
+repairflow config check
+# restart the service so the listener moves
+```
+
+Then open `http://192.0.2.10:8091/login` from any device on that network. The limits are not
+mitigated by this mode: the traffic is plain HTTP, so the password and the session cookie cross the
+network in clear text and the cookie cannot be marked `Secure`; the listener depends on that address
+staying assigned, so a DHCP change needs a configuration edit and a restart; the login throttle
+counts each LAN peer; and only a normal browser window is supported — a page that embeds RepairFlow
+in a frame from another origin is refused by the origin check. Use it with synthetic or
+low-sensitivity records until TLS (see above) is in place, and never forward port 8091 from the
+internet.
+
 ### Unsafe LAN demo mode
 
 `web.allow_insecure_lan=true` permits `auth_required=false` on a non-loopback listener for temporary

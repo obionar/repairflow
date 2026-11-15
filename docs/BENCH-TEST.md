@@ -76,6 +76,11 @@ label layout/size remain in p15.
 
 RepairFlow must remain usable when printing is switched off or the driver is unavailable.
 
+Record three things on the bench machine as well: how long the button takes to answer (a cold,
+daemon-less p15 pays its whole discovery timeout), whether `bluetoothctl show` still reports the
+adapter powered after a failed attempt, and the text the page shows — it is the driver's own
+message, not a user-facing sentence.
+
 ## Rehearse recovery on the bench machine
 
 Stop the foreground server with Ctrl+C, then use new archive/destination paths:
