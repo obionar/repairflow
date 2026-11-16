@@ -91,7 +91,7 @@ func runUpdate(ctx context.Context, opts options, args []string, getenv Env) (an
 		if err := update.VerifyDetached(pub, data, sig); err != nil {
 			return nil, err
 		}
-		return verifyResult{File: p.get("file"), SignatureFile: p.get("signature")}, nil
+		return verifyResult{File: p.get("file"), SignatureFile: p.get("signature"), Verified: true}, nil
 
 	case "keygen":
 		p, err := parseArgs(rest, []string{"out"}, nil)

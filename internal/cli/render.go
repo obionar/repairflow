@@ -196,6 +196,8 @@ func renderData(data any) (string, bool) {
 			v.PublicKeyFile, v.PublicKeyHex, v.PrivateKeyFile, v.Warning), true
 	case *signResult:
 		return fmt.Sprintf("signature written: %s (key %s)\n", v.SignatureFile, v.PublicKeyHex), true
+	case verifyResult:
+		return fmt.Sprintf("signature valid: %s\n", v.File), true
 	case *service.Result:
 		return renderService(v), true
 	case *serviceReport:

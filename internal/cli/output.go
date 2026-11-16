@@ -133,7 +133,7 @@ var commandUsage = map[string]string{
 	"service install": "repairflow service install [--init systemd|openrc|none] [--name NAME] [--no-enable]",
 	"service status":  "repairflow service status [--init systemd|openrc|none] [--name NAME]",
 	"service remove":  "repairflow service remove [--init systemd|openrc|none] [--name NAME]",
-	"update":          "repairflow update <check|apply|keygen|sign> ...",
+	"update":          "repairflow update <check|apply|verify|keygen|sign> ...",
 	"version":         "repairflow version",
 	"help":            "repairflow help",
 }

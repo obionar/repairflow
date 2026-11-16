@@ -245,6 +245,7 @@ service remove [--init systemd|openrc|none] [--name NAME]
 
 update check --manifest MANIFEST --signature SIGNATURE
 update apply --file ARTIFACT --manifest MANIFEST --signature SIGNATURE --confirm
+update verify --file SHA256SUMS --signature SHA256SUMS.sig
 update keygen --out DIR
 update sign --key KEY --manifest MANIFEST --out SIGNATURE
 
@@ -275,6 +276,11 @@ FIFOs are refused. The target directory must be writable. Updates and source ins
 a lock next to the executable; the updater re-reads the installed version under that lock rather
 than trusting the invoking process's version. A root-owned installation needs `sudo`/`doas` for apply. Verified apply
 is Linux-only; restart through the service supervisor after success.
+
+`update verify` checks a detached Ed25519 signature over any file against the release public key
+embedded in the build. It is how the signed `SHA256SUMS` list is authenticated before an archive is
+extracted, because `manifest.json` covers only the platform binaries. It prints
+`signature valid: FILE` and exits 0, or fails with `validation_error` (exit 2).
 
 `update keygen` creates `release-signing.pub` and `release-signing.key` exclusively. It refuses
 existing files or symlinks instead of overwriting them, writes the private key as owner-only `0600`,
