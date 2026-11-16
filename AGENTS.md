@@ -95,11 +95,12 @@ Do not invent deployment steps. Follow:
 - `docs/USAGE.md` — daily web/CLI workflows, attachments, languages, backup/restore and diagnostics.
 
 The binary must live at a stable path before `service install`; the unit pins its absolute path.
-The default install is `/usr/local/bin/repairflow`, owned by root so a regular user can execute but
-not replace it; workspaces remain at `~/.repairflow` unless `--home`/`REPAIRFLOW_HOME` is used.
-A real deployment needs a verified backup and explicit owner authorization. Unsigned builds cannot
-use `update apply`; that refusal is deliberate. Replacing a root-owned installation requires
-`doas`/`sudo`. Release bundles must include `LICENSE`; run `make license-check` before packaging.
+The default source installation is `$HOME/.local/bin/repairflow`, owned by the operator;
+`REPAIRFLOW_PREFIX=/usr/local` selects a shared root-owned layout. Workspaces remain at
+`~/.repairflow` unless `--home`/`REPAIRFLOW_HOME` is used. A real deployment needs a verified backup
+and explicit owner authorization. Unsigned builds cannot use `update apply`; that refusal is
+deliberate. Only a root-owned replacement requires `doas`/`sudo`. Release bundles must include
+`LICENSE`; run `make license-check` before packaging. Older release docs may describe older defaults.
 
 ## Skills
 
