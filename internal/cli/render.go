@@ -25,8 +25,8 @@ func renderData(data any) (string, bool) {
 		return fmt.Sprintf("home: %s\ninitialized: %t\nconfig_version: %d\napp.environment: %s\nweb: %s:%d\n",
 			v.Home, v.Initialized, v.Config.ConfigVersion, v.Config.App.Environment, v.Config.Web.Host, v.Config.Web.Port), true
 	case buildinfo.Info:
-		return fmt.Sprintf("repairflow %s\ncommit: %s\nbuild: %s\ngo: %s\nplatform: %s\n",
-			v.Version, v.Commit, v.BuildDate, v.GoVersion, v.Platform), true
+		return fmt.Sprintf("repairflow %s\ncommit: %s\nbuild: %s\ngo: %s\nplatform: %s\nsource: %s\n",
+			v.Version, v.Commit, v.BuildDate, v.GoVersion, v.Platform, v.SourceURL), true
 	case app.Customer:
 		return renderCustomer(v), true
 	case customerShow:

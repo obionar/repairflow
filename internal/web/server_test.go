@@ -27,6 +27,7 @@ type webFixture struct {
 	t       *testing.T
 	svc     *app.Service
 	handler http.Handler
+	home    string
 }
 
 func newWeb(t *testing.T) *webFixture {
@@ -58,7 +59,7 @@ func newWebWithLogger(t *testing.T, logger *slog.Logger) *webFixture {
 		t.Fatal(err)
 	}
 	srv.WithLogger(logger)
-	return &webFixture{t: t, svc: svc, handler: srv.Handler()}
+	return &webFixture{t: t, svc: svc, handler: srv.Handler(), home: home}
 }
 
 func (f *webFixture) login(username, password string) *http.Cookie {

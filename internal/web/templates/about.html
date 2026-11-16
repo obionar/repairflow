@@ -1,0 +1,16 @@
+{{template "head" .}}
+<h1 id="about-heading">About RepairFlow</h1>
+<div class="panel">
+  <div class="panel-body">
+    <p>RepairFlow is repair-shop management software, licensed under AGPL-3.0-only.</p>
+    <dl>
+      <dt>Version</dt><dd id="about-version">{{.Data.Version}}</dd>
+      <dt>Commit</dt><dd id="about-commit">{{.Data.Commit}}</dd>
+      <dt>Platform</dt><dd id="about-platform">{{.Data.Platform}}</dd>
+      <dt>Source code</dt><dd id="about-source"><a href="{{.Data.SourceURL}}">{{.Data.SourceURL}}</a></dd>
+      <dt>Licence</dt><dd id="about-licence">AGPL-3.0-only</dd>
+    </dl>
+    <p class="muted">If you distribute a modified RepairFlow, you must offer every user of your version the Corresponding Source of that version.</p>
+  </div>
+</div>
+{{template "tail" .}}

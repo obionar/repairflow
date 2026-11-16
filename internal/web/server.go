@@ -249,6 +249,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(mustSub())))
 	mux.HandleFunc("GET /login", s.loginForm)
 	mux.HandleFunc("POST /login", s.loginSubmit)
+	mux.HandleFunc("GET /about", s.about)
 	mux.HandleFunc("POST /logout", s.authed(s.logout, app.RoleViewer))
 
 	mux.HandleFunc("GET /{$}", s.authed(s.dashboard, app.RoleViewer))
