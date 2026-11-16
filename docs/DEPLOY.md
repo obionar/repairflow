@@ -262,8 +262,8 @@ destination without room, and any layout it cannot verify. Only the default serv
 supported: the effective unit or init script must pin the same binary and `--home` that this run
 uses, otherwise the script refuses and prints manual steps. On systemd it reads the unit systemd
 actually loaded (`systemctl --user show --property=FragmentPath`) and refuses an unreadable unit or
-one that needs `daemon-reload`, so a stale or duplicate file at a guessed path cannot decide the
-run. `REPAIRFLOW_INITD` overrides `/etc/init.d` when the OpenRC script lives elsewhere.
+one that needs `daemon-reload` or has drop-ins (unsupported overrides require manual update),
+so a stale or duplicate file at a guessed path cannot decide the run. `REPAIRFLOW_INITD` overrides `/etc/init.d` when the OpenRC script lives elsewhere.
 
 The run is fail-closed and has no automatic rollback:
 

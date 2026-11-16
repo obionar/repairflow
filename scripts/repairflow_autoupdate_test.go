@@ -159,6 +159,7 @@ case $verb in
     for a in "$@"; do case $a in --property=*) prop=${a#--property=};; esac; done
     case $prop in
       FragmentPath) [ -f "$STATE/fragment_path" ] || exit 1; cat "$STATE/fragment_path";;
+      DropInPaths) if [ -f "$STATE/drop_in_paths" ]; then cat "$STATE/drop_in_paths"; fi;;
       NeedDaemonReload) if [ -f "$STATE/need_daemon_reload" ]; then cat "$STATE/need_daemon_reload"; else echo no; fi;;
       *) exit 1;;
     esac
@@ -1258,6 +1259,21 @@ func TestAutoupdateRefusesEffectiveSystemdFragmentMismatch(t *testing.T) {
 	}
 	if !strings.Contains(h.messageLog(), "refuse:") {
 		t.Fatalf("refusal was not logged:\n%s", h.messageLog())
+	}
+}
+
+func TestAutoupdateRefusesSystemdDropIns(t *testing.T) {
+	h := newAutoHarness(t)
+	h.setupUpdate()
+	h.setupSystemd()
+	h.set("drop_in_paths", "/synthetic/repairflow.service.d/override.conf")
+	out, err := h.run()
+	if err != nil {
+		t.Fatalf("refusal: %v\n%s", err, out)
+	}
+	h.requireNoMutation(t)
+	if h.has("systemctl --user stop") || !strings.Contains(h.messageLog(), "drop-in") {
+		t.Fatalf("overridden unit must be refused before stop:\n%s\n%s", h.callsLog(), h.messageLog())
 	}
 }
 

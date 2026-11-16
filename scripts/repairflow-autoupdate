@@ -203,6 +203,10 @@ if command -v systemctl >/dev/null 2>&1; then
   [ -f "$fragment" ] || refuse "effective systemd unit $fragment is missing; update manually"
   [ "$reload" = no ] ||
     refuse "repairflow.service has NeedDaemonReload='$reload'; run 'systemctl --user daemon-reload', then retry"
+  # A fragment alone does not describe the loaded command if a drop-in overrides it.
+  dropins=$(systemctl --user show --property=DropInPaths --value repairflow.service 9>&- 2>/dev/null) ||
+    refuse "cannot inspect systemd drop-ins; update manually"
+  [ -z "$dropins" ] || refuse "systemd drop-ins require manual update: $dropins"
   n_exec=$(sed -n 's/^ExecStart=//p' "$fragment" | wc -l | tr -d ' ')
   [ "$n_exec" = 1 ] ||
     refuse "unsupported unit $fragment: expected exactly one ExecStart, found $n_exec; update manually"

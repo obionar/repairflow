@@ -163,7 +163,7 @@ archive also ships `repairflow-update` and `repairflow-autoupdate`; consult thei
 and `docs/DEPLOY.md` before using them. Do not configure unattended activation without approval.
 
 `repairflow-autoupdate` is fail-closed: it verifies the effective unit's pinned binary and `--home`
-(on systemd, the loaded `FragmentPath`; it refuses a unit that needs `daemon-reload`), stops the
+(on systemd, the loaded `FragmentPath`; it refuses `daemon-reload` needs and drop-in overrides), stops the
 intended service before the backup and swap, and after the restart requires the configured endpoint
 to serve the exact `about-version`/`about-commit` values, the candidate's `doctor` to pass, and the
 record count to be unchanged before reporting success. Any HTTP response from the old endpoint
