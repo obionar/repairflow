@@ -54,14 +54,23 @@ case " $* " in
     last=
     for a in "$@"; do last=$a; done
     [ -f "$last" ] || exit 3
+    [ -f "$STATE/backup_verify_fail" ] && exit 4
     exit 0;;
   *" customer list "*)
     n=$(cat "$STATE/customers" 2>/dev/null) || n=3
     if [ "$ver" = 9.9.9 ] && [ -f "$STATE/customers_after" ]; then n=$(cat "$STATE/customers_after"); fi
+    if [ "$ver" = 9.9.9 ] && [ -f "$STATE/customers_fail_after" ]; then
+      echo "customer list failed" >&2
+      exit 4
+    fi
     printf '{"ok":true,"command":"customer list","contract":2,"data":{"total":%s}}\n' "$n"
     exit 0;;
   *" doctor "*)
     [ -f "$STATE/doctor_fail" ] && exit 5
+    if [ "$ver" = 9.9.9 ] && [ -f "$STATE/doctor_fail_candidate" ]; then
+      echo "doctor: database check failed" >&2
+      exit 5
+    fi
     exit 0;;
   *" status "*)
     exit 0;;
@@ -93,8 +102,23 @@ echo "applied $1"
 exit 0
 `
 
+// fakeCurl implements the two contracts the updater relies on: curl -f exits 22
+// on an HTTP error, while a liveness request without -f prints any status code.
+// Only a definite connection refusal (7) may look like a free port.
 const fakeCurl = `#!/bin/sh
 printf 'curl|%s\n' "$*" >>"$CALLS"
+fail=0
+wantcode=0
+prev=
+url=
+for a in "$@"; do
+  case $a in
+    -f|--fail) fail=1;;
+    '%{http_code}') wantcode=1;;
+    http://*|https://*) url=$a;;
+  esac
+  prev=$a
+done
 case " $* " in
   *" -fsSI "*)
     latest=$(cat "$STATE/latest" 2>/dev/null) || latest=
@@ -103,19 +127,20 @@ case " $* " in
     exit 0;;
 esac
 [ -f "$STATE/listening" ] || exit 7
-[ -f "$STATE/curl_fail" ] && exit 7
-url=
-for a in "$@"; do
-  case $a in
-    http://*|https://*) url=$a;;
-  esac
-done
+[ -f "$STATE/curl_ambiguous" ] && exit 28
+code=$(cat "$STATE/occupied_code" 2>/dev/null) || code=200
+[ -f "$STATE/curl_fail" ] && code=000
+if [ "$wantcode" = 1 ]; then printf '%s' "$code"; exit 0; fi
+[ "$code" = 000 ] && exit 7
+if [ "$fail" = 1 ]; then
+  case $code in 2??) ;; *) exit 22;; esac
+fi
 case $url in
   */about)
     if [ -f "$STATE/about.html" ]; then
       cat "$STATE/about.html"
     else
-      printf '<p>version %s commit %s</p>\n' "$(cat "$STATE/expected_version" 2>/dev/null)" "$(cat "$STATE/expected_commit" 2>/dev/null)"
+      printf '<dd id="about-version">%s</dd>\n<dd id="about-commit">%s</dd>\n' "$(cat "$STATE/expected_version" 2>/dev/null)" "$(cat "$STATE/expected_commit" 2>/dev/null)"
     fi
     exit 0;;
   */login)
@@ -129,17 +154,30 @@ const fakeSystemctl = `#!/bin/sh
 printf 'systemctl|%s|%s\n' "$*" "$(cat "$STATE/installed_version" 2>/dev/null)" >>"$CALLS"
 verb=$2
 case $verb in
+  show)
+    prop=
+    for a in "$@"; do case $a in --property=*) prop=${a#--property=};; esac; done
+    case $prop in
+      FragmentPath) [ -f "$STATE/fragment_path" ] || exit 1; cat "$STATE/fragment_path";;
+      NeedDaemonReload) if [ -f "$STATE/need_daemon_reload" ]; then cat "$STATE/need_daemon_reload"; else echo no; fi;;
+      *) exit 1;;
+    esac
+    exit 0;;
   stop)
     [ -f "$STATE/stop_fail" ] && exit 1
+    if [ "$(cat "$STATE/installed_version" 2>/dev/null)" = 9.9.9 ] && [ -f "$STATE/stop_fail_after" ]; then exit 1; fi
+    rm -f "$STATE/service_active"
     [ -f "$STATE/stubborn_stop" ] || rm -f "$STATE/listening"
     exit 0;;
   start)
     [ -f "$STATE/start_fail" ] && exit 1
+    if [ -f "$STATE/slow_start" ]; then : >"$STATE/started_marker"; sleep 2; fi
+    : >"$STATE/service_active"
     : >"$STATE/listening"
     exit 0;;
   is-active)
     [ -f "$STATE/status_unknown" ] && { echo unknown; exit 4; }
-    if [ -f "$STATE/listening" ]; then echo active; exit 0; fi
+    if [ -f "$STATE/service_active" ]; then echo active; exit 0; fi
     echo inactive
     exit 3;;
 esac
@@ -152,15 +190,19 @@ verb=$2
 case $verb in
   stop)
     [ -f "$STATE/stop_fail" ] && exit 1
+    if [ "$(cat "$STATE/installed_version" 2>/dev/null)" = 9.9.9 ] && [ -f "$STATE/stop_fail_after" ]; then exit 1; fi
+    rm -f "$STATE/service_active"
     [ -f "$STATE/stubborn_stop" ] || rm -f "$STATE/listening"
     exit 0;;
   start)
     [ -f "$STATE/start_fail" ] && exit 1
+    if [ -f "$STATE/slow_start" ]; then : >"$STATE/started_marker"; sleep 2; fi
+    : >"$STATE/service_active"
     : >"$STATE/listening"
     exit 0;;
   status)
     [ -f "$STATE/status_unknown" ] && { echo "status: crashed"; exit 4; }
-    if [ -f "$STATE/listening" ]; then echo "status: started"; exit 0; fi
+    if [ -f "$STATE/service_active" ]; then echo "status: started"; exit 0; fi
     echo "status: stopped"
     exit 3;;
 esac
@@ -185,6 +227,7 @@ type autoHarness struct {
 	bin     string
 	initd   string
 	script  string
+	tries   string
 }
 
 func newAutoHarness(t *testing.T) *autoHarness {
@@ -201,6 +244,7 @@ func newAutoHarness(t *testing.T) *autoHarness {
 		bin:     filepath.Join(root, "bin", "repairflow"),
 		initd:   filepath.Join(root, "init.d"),
 		script:  filepath.Join(root, "bin", "repairflow-autoupdate"),
+		tries:   "1",
 	}
 	h.ws = filepath.Join(h.home, ".repairflow")
 	for _, dir := range []string{h.home, h.tmp, h.state, h.fakebin, filepath.Dir(h.bin), h.initd, h.ws} {
@@ -208,8 +252,8 @@ func newAutoHarness(t *testing.T) *autoHarness {
 			t.Fatal(err)
 		}
 	}
-	h.linkTools("awk", "basename", "cat", "cp", "cut", "date", "df", "dirname", "du",
-		"flock", "head", "id", "mkdir", "mktemp", "rm", "sed", "sleep", "tail", "tr", "xargs")
+	h.linkTools("awk", "basename", "cat", "chmod", "cp", "cut", "date", "df", "dirname", "du",
+		"flock", "head", "id", "mkdir", "mktemp", "rm", "sed", "sleep", "tail", "tr", "wc", "xargs")
 	h.writeTool("repairflow-update", fakeUpdate)
 	h.writeTool("curl", fakeCurl)
 	h.writeFile(h.bin, fakeRepairflow, 0o755)
@@ -266,7 +310,8 @@ func (h *autoHarness) setupUpdate() {
 	h.set("expected_commit", "newcommit")
 	h.set("customers", "3")
 	h.set("config.json", configJSON("127.0.0.1", 8091))
-	h.set("listening", "1") // the old service is already serving
+	h.set("listening", "1")      // the old service is already serving
+	h.set("service_active", "1") // and its supervisor reports it running
 }
 
 func (h *autoHarness) setupOpenRC() {
@@ -285,7 +330,11 @@ func (h *autoHarness) setupSystemd() {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		h.t.Fatal(err)
 	}
-	h.writeFile(filepath.Join(dir, "repairflow.service"), unit, 0o644)
+	path := filepath.Join(dir, "repairflow.service")
+	h.writeFile(path, unit, 0o644)
+	// The effective unit that systemd loaded is what the updater must trust.
+	h.set("fragment_path", path)
+	h.set("need_daemon_reload", "no")
 }
 
 func (h *autoHarness) env() []string {
@@ -296,7 +345,7 @@ func (h *autoHarness) env() []string {
 		"REPAIRFLOW_HOME=" + h.ws,
 		"REPAIRFLOW_BIN=" + h.bin,
 		"REPAIRFLOW_INITD=" + h.initd,
-		"RF_UPDATE_TRIES=1",
+		"RF_UPDATE_TRIES=" + h.tries,
 		"CALLS=" + h.calls,
 		"STATE=" + h.state,
 	}
@@ -397,7 +446,7 @@ func (h *autoHarness) requirePreserved(t *testing.T) {
 	if moved, _ := filepath.Glob(h.ws + ".broken-*"); len(moved) != 0 {
 		t.Fatalf("live workspace was renamed: %v", moved)
 	}
-	if _, err := os.Stat(filepath.Join(h.ws, "cache", "update", "failed-v9.9.9")); err != nil {
+	if _, err := os.Stat(filepath.Join(h.ws, ".update-state", "failed-v9.9.9")); err != nil {
 		t.Fatalf("failed-tag marker missing: %v", err)
 	}
 	if strings.Contains(h.messageLog(), "rolled back") || strings.Contains(h.messageLog(), "ok: v9.9.9") {
@@ -529,7 +578,7 @@ func TestAutoupdateRefusesSystemdHomeMismatch(t *testing.T) {
 		t.Fatalf("a refused layout must not fail the job: %v\n%s\n%s", err, out, h.messageLog())
 	}
 	h.requireNoMutation(t)
-	if h.has("systemctl") {
+	if h.has("systemctl --user stop") || h.has("systemctl --user start") {
 		t.Fatalf("unrelated systemd unit was touched:\n%s", h.callsLog())
 	}
 	if !strings.Contains(h.messageLog(), "refuse:") {
@@ -629,10 +678,10 @@ func TestAutoupdateFailedTagIsNotRetried(t *testing.T) {
 	h := newAutoHarness(t)
 	h.setupUpdate()
 	h.setupOpenRC()
-	if err := os.MkdirAll(filepath.Join(h.ws, "cache", "update"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(h.ws, ".update-state"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	h.writeFile(filepath.Join(h.ws, "cache", "update", "failed-v9.9.9"), "", 0o600)
+	h.writeFile(filepath.Join(h.ws, ".update-state", "failed-v9.9.9"), "", 0o600)
 
 	out, err := h.run()
 	if err != nil {
@@ -648,7 +697,7 @@ func TestAutoupdateSerializesWithFlock(t *testing.T) {
 	h := newAutoHarness(t)
 	h.setupUpdate()
 	h.setupOpenRC()
-	state := filepath.Join(h.ws, "cache", "update")
+	state := filepath.Join(h.ws, ".update-state")
 	if err := os.MkdirAll(state, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -756,13 +805,13 @@ func TestAutoupdateHealthFailuresPreserveState(t *testing.T) {
 		{
 			name: "wrong-version",
 			setup: func(h *autoHarness) {
-				h.set("about.html", "<p>version 0.1.0 commit newcommit</p>\n")
+				h.set("about.html", "<dd id=\"about-version\">0.1.0</dd><dd id=\"about-commit\">newcommit</dd>\n")
 			},
 		},
 		{
 			name: "wrong-commit",
 			setup: func(h *autoHarness) {
-				h.set("about.html", "<p>version 9.9.9 commit oldcommit</p>\n")
+				h.set("about.html", "<dd id=\"about-version\">9.9.9</dd><dd id=\"about-commit\">oldcommit</dd>\n")
 			},
 		},
 		{
@@ -820,7 +869,7 @@ func TestAutoupdateLogFailureDoesNotMoveOrClaimRollback(t *testing.T) {
 	h := newAutoHarness(t)
 	h.setupUpdate()
 	h.setupOpenRC()
-	h.set("about.html", "<p>version 0.1.0 commit oldcommit</p>\n")
+	h.set("about.html", "<dd id=\"about-version\">0.1.0</dd><dd id=\"about-commit\">oldcommit</dd>\n")
 	logs := filepath.Join(h.ws, "logs")
 	if err := os.MkdirAll(logs, 0o700); err != nil {
 		t.Fatal(err)
@@ -848,5 +897,446 @@ func TestAutoupdateLogFailureDoesNotMoveOrClaimRollback(t *testing.T) {
 	}
 	if _, err := os.Stat(h.bin + ".prev"); err != nil {
 		t.Fatalf("previous binary was not preserved: %v", err)
+	}
+}
+
+// --- OPS-01 closure regressions ---
+
+// The installed candidate must pass doctor after the restart, before success.
+func TestAutoupdateRunsDoctorAfterStart(t *testing.T) {
+	h := newAutoHarness(t)
+	h.setupUpdate()
+	h.setupOpenRC()
+
+	out, err := h.run()
+	if err != nil {
+		t.Fatalf("unexpected failure: %v\n%s\n%s", err, out, h.callsLog())
+	}
+	h.requireInOrder(t,
+		[]string{"rc-service", "repairflow start", "|9.9.9"},
+		[]string{"repairflow", "doctor", "|9.9.9"},
+		[]string{"repairflow", "customer list", "|9.9.9"},
+	)
+}
+
+func TestAutoupdateCandidateDoctorFailureRejects(t *testing.T) {
+	h := newAutoHarness(t)
+	h.setupUpdate()
+	h.setupOpenRC()
+	h.set("doctor_fail_candidate", "1")
+
+	out, err := h.run()
+	if err == nil {
+		t.Fatalf("an unhealthy candidate reported success:\n%s\n%s", out, h.callsLog())
+	}
+	h.requirePreserved(t)
+	h.requireInOrder(t,
+		[]string{"rc-service", "repairflow start", "|9.9.9"},
+		[]string{"curl", "/about"},
+		[]string{"repairflow", "doctor", "|9.9.9"},
+	)
+	if h.lineIndex("repairflow", "customer list", "|9.9.9") >= 0 {
+		t.Fatalf("record count was read before doctor passed:\n%s", h.callsLog())
+	}
+}
+
+// A post-mutation count command that exits nonzero must reject the candidate,
+// not abort under set -e before the cleanup can stop and mark it.
+func TestAutoupdatePostCountFailureRejects(t *testing.T) {
+	h := newAutoHarness(t)
+	h.setupUpdate()
+	h.setupOpenRC()
+	h.set("customers_fail_after", "1")
+
+	out, err := h.run()
+	if err == nil {
+		t.Fatalf("a failed post-update count reported success:\n%s\n%s", out, h.callsLog())
+	}
+	h.requirePreserved(t)
+	h.requireInOrder(t,
+		[]string{"rc-service", "repairflow start", "|9.9.9"},
+		[]string{"rc-service", "repairflow stop", "|9.9.9"},
+	)
+	if strings.Contains(h.messageLog(), "ok: v9.9.9") {
+		t.Fatalf("failure reported as success:\n%s", h.messageLog())
+	}
+}
+
+// An unverified backup must never be described as a verified restore point.
+func TestAutoupdateBackupVerifyFailureIsNotVerified(t *testing.T) {
+	h := newAutoHarness(t)
+	h.setupUpdate()
+	h.setupOpenRC()
+	h.set("backup_verify_fail", "1")
+
+	out, err := h.run()
+	if err == nil {
+		t.Fatalf("an unverified backup reported success:\n%s\n%s", out, h.callsLog())
+	}
+	if h.has("--apply") {
+		t.Fatalf("candidate was applied without a verified backup:\n%s", h.callsLog())
+	}
+	msg := h.messageLog()
+	if strings.Contains(msg, "verified pre-update backup") {
+		t.Fatalf("unverified backup claimed as verified:\n%s", msg)
+	}
+	if !strings.Contains(msg, "NO verified backup") {
+		t.Fatalf("missing truthful backup warning:\n%s", msg)
+	}
+	kept, _ := filepath.Glob(filepath.Join(h.home, "backups", "pre-v9.9.9-*", "repairflow.rfbak"))
+	if len(kept) != 1 {
+		t.Fatalf("incomplete backup result was not preserved: %v", kept)
+	}
+	if _, err := os.Stat(h.bin + ".prev"); err != nil {
+		t.Fatalf("previous binary was not preserved: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(h.ws, "workspace-marker")); err != nil {
+		t.Fatalf("live workspace was moved: %v", err)
+	}
+}
+
+// A candidate that cannot be stopped is possibly still running; the summary
+// must report the observed state, never claim it stopped.
+func TestAutoupdateCandidateStopFailureIsNotReportedStopped(t *testing.T) {
+	h := newAutoHarness(t)
+	h.setupUpdate()
+	h.setupOpenRC()
+	h.set("doctor_fail_candidate", "1")
+	h.set("stop_fail_after", "1")
+
+	out, err := h.run()
+	if err == nil {
+		t.Fatalf("a possibly running candidate reported success:\n%s\n%s", out, h.callsLog())
+	}
+	msg := h.messageLog()
+	if strings.Contains(msg, "is STOPPED") {
+		t.Fatalf("possibly running candidate reported as stopped:\n%s", msg)
+	}
+	if !strings.Contains(msg, "is RUNNING") {
+		t.Fatalf("observed running state was not reported:\n%s", msg)
+	}
+}
+
+// If the failed-tag marker cannot be written, the summary must not promise that
+// the tag is suppressed.
+func TestAutoupdateMarkerFailureDoesNotClaimRetrySuppressed(t *testing.T) {
+	h := newAutoHarness(t)
+	h.setupUpdate()
+	h.setupOpenRC()
+	h.set("doctor_fail_candidate", "1")
+	if err := os.MkdirAll(filepath.Join(h.ws, ".update-state", "failed-v9.9.9"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := h.run()
+	if err == nil {
+		t.Fatalf("an unmarked failure reported success:\n%s\n%s", out, h.callsLog())
+	}
+	msg := h.messageLog()
+	if strings.Contains(msg, "will not be retried") {
+		t.Fatalf("missing marker still claimed retry suppression:\n%s", msg)
+	}
+	if !strings.Contains(msg, "could not record") {
+		t.Fatalf("marker failure was not reported:\n%s", msg)
+	}
+}
+
+// Every HTTP response proves a listener; only a connection refusal is quiescent.
+func TestAutoupdateTreatsAnyHTTPResponseAsOccupied(t *testing.T) {
+	for _, code := range []string{"401", "403", "404", "500"} {
+		t.Run(code, func(t *testing.T) {
+			h := newAutoHarness(t)
+			h.setupUpdate()
+			h.setupOpenRC()
+			h.set("stubborn_stop", "1")
+			h.set("occupied_code", code)
+
+			out, err := h.run()
+			if err == nil {
+				t.Fatalf("HTTP %s after stop was treated as free:\n%s\n%s", code, out, h.callsLog())
+			}
+			h.requireNoMutation(t)
+			if !strings.Contains(h.messageLog(), "still answers") {
+				t.Fatalf("occupied listener was not reported:\n%s", h.messageLog())
+			}
+			if h.has("repairflow start") {
+				t.Fatalf("a foreign listener was touched:\n%s", h.callsLog())
+			}
+		})
+	}
+}
+
+// A timeout or other transport error cannot prove the port is free.
+func TestAutoupdateRefusesAmbiguousListenerState(t *testing.T) {
+	h := newAutoHarness(t)
+	h.setupUpdate()
+	h.setupOpenRC()
+	h.set("stubborn_stop", "1")
+	h.set("curl_ambiguous", "1")
+
+	out, err := h.run()
+	if err == nil {
+		t.Fatalf("ambiguous listener state reported success:\n%s\n%s", out, h.callsLog())
+	}
+	h.requireNoMutation(t)
+	if !strings.Contains(h.messageLog(), "ambiguous") {
+		t.Fatalf("ambiguous listener state was not reported:\n%s", h.messageLog())
+	}
+}
+
+// A signal after the candidate started must stop it and tell the truth.
+func TestAutoupdateSignalAfterStartStopsCandidate(t *testing.T) {
+	h := newAutoHarness(t)
+	h.setupUpdate()
+	h.setupOpenRC()
+	h.set("slow_start", "1")
+
+	cmd := h.command()
+	var stderr bytes.Buffer
+	cmd.Stdout = io.Discard
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	started := filepath.Join(h.state, "started_marker")
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Stat(started); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+			t.Fatalf("candidate never started: %s", stderr.String())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Wait(); err == nil {
+		t.Fatalf("interrupted run reported success: %s", stderr.String())
+	}
+	msg := h.messageLog() + stderr.String()
+	if !strings.Contains(msg, "MANUAL RECOVERY") {
+		t.Fatalf("no manual recovery message:\n%s", msg)
+	}
+	if !strings.Contains(msg, "candidate v9.9.9 was applied") {
+		t.Fatalf("applied candidate was not reported:\n%s", msg)
+	}
+	if strings.Contains(msg, "ok: v9.9.9") {
+		t.Fatalf("interrupted run reported success:\n%s", msg)
+	}
+	h.requireInOrder(t,
+		[]string{"rc-service", "repairflow start", "|9.9.9"},
+		[]string{"rc-service", "repairflow stop", "|9.9.9"},
+	)
+	if _, err := os.Stat(filepath.Join(h.ws, ".update-state", "failed-v9.9.9")); err != nil {
+		t.Fatalf("failed-tag marker missing: %v", err)
+	}
+	if _, err := os.Stat(h.bin + ".prev"); err != nil {
+		t.Fatalf("previous binary was not preserved: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(h.ws, "workspace-marker")); err != nil {
+		t.Fatalf("live workspace was moved: %v", err)
+	}
+}
+
+// The /about identity is the exact field value, not any matching substring.
+func TestAutoupdateRequiresExactAboutIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{
+			name: "version-prefix",
+			body: `<dd id="about-version">9.9.90</dd><dd id="about-commit">newcommit</dd>`,
+		},
+		{
+			name: "commit-prefix",
+			body: `<dd id="about-version">9.9.9</dd><dd id="about-commit">newcommit-extra</dd>`,
+		},
+		{
+			name: "substring-elsewhere",
+			body: `<p>version 9.9.9 commit newcommit</p>`,
+		},
+		{
+			name: "missing-commit",
+			body: `<dd id="about-version">9.9.9</dd>`,
+		},
+		{
+			name: "duplicate-version",
+			body: `<dd id="about-version">9.9.9</dd><dd id="about-version">9.9.9</dd><dd id="about-commit">newcommit</dd>`,
+		},
+		{
+			name: "duplicate-commit",
+			body: `<dd id="about-version">9.9.9</dd><dd id="about-commit">newcommit</dd><dd id="about-commit">newcommit</dd>`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newAutoHarness(t)
+			h.setupUpdate()
+			h.setupOpenRC()
+			h.set("about.html", tc.body+"\n")
+
+			out, err := h.run()
+			if err == nil {
+				t.Fatalf("inexact /about identity reported success:\n%s\n%s", out, h.callsLog())
+			}
+			h.requirePreserved(t)
+		})
+	}
+}
+
+// A bad RF_UPDATE_TRIES must refuse before the stop, not abort mid-run.
+func TestAutoupdateRejectsInvalidTriesBeforeStop(t *testing.T) {
+	for _, tries := range []string{"abc", "0", "-1", "1000000", "1.5"} {
+		t.Run(tries, func(t *testing.T) {
+			h := newAutoHarness(t)
+			h.setupUpdate()
+			h.setupOpenRC()
+			h.tries = tries
+
+			out, err := h.run()
+			if err != nil {
+				t.Fatalf("an invalid RF_UPDATE_TRIES must be a refusal: %v\n%s\n%s", err, out, h.messageLog())
+			}
+			h.requireNoMutation(t)
+			if h.has("repairflow stop") {
+				t.Fatalf("service was stopped despite an invalid RF_UPDATE_TRIES:\n%s", h.callsLog())
+			}
+			if !strings.Contains(h.messageLog(), "refuse:") {
+				t.Fatalf("refusal was not logged:\n%s", h.messageLog())
+			}
+		})
+	}
+}
+
+// The effective unit is systemd's own FragmentPath, not a guessed default file.
+func TestAutoupdateUsesEffectiveSystemdFragment(t *testing.T) {
+	h := newAutoHarness(t)
+	h.setupUpdate()
+	h.setupSystemd()
+	// A stale duplicate at the default path must not change the decision.
+	stale := filepath.Join(h.home, ".config", "systemd", "user", "repairflow.service")
+	h.writeFile(stale, "[Service]\nExecStart=\""+h.bin+"\" serve --home /srv/stale\nWorkingDirectory=/srv/stale\n", 0o644)
+	effective := filepath.Join(h.root, "xdg", "systemd", "user", "repairflow.service")
+	if err := os.MkdirAll(filepath.Dir(effective), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	h.writeFile(effective, "[Service]\nExecStart=\""+h.bin+"\" serve --home \""+h.ws+"\"\nWorkingDirectory=\""+h.ws+"\"\n", 0o644)
+	h.set("fragment_path", effective)
+
+	out, err := h.run()
+	if err != nil {
+		t.Fatalf("unexpected failure: %v\n%s\n%s", err, out, h.callsLog())
+	}
+	h.requireInOrder(t,
+		[]string{"systemctl", "--user stop repairflow.service"},
+		[]string{"systemctl", "--user start repairflow.service"},
+	)
+}
+
+func TestAutoupdateRefusesEffectiveSystemdFragmentMismatch(t *testing.T) {
+	h := newAutoHarness(t)
+	h.setupUpdate()
+	h.setupSystemd()
+	effective := filepath.Join(h.root, "xdg", "systemd", "user", "repairflow.service")
+	if err := os.MkdirAll(filepath.Dir(effective), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	h.writeFile(effective, "[Service]\nExecStart=\""+h.bin+"\" serve --home /srv/other\nWorkingDirectory=/srv/other\n", 0o644)
+	h.set("fragment_path", effective)
+
+	out, err := h.run()
+	if err != nil {
+		t.Fatalf("a refused layout must not fail the job: %v\n%s\n%s", err, out, h.messageLog())
+	}
+	h.requireNoMutation(t)
+	if h.has("systemctl --user stop") {
+		t.Fatalf("unrelated systemd unit was touched:\n%s", h.callsLog())
+	}
+	if !strings.Contains(h.messageLog(), "refuse:") {
+		t.Fatalf("refusal was not logged:\n%s", h.messageLog())
+	}
+}
+
+func TestAutoupdateRefusesDaemonReloadNeeded(t *testing.T) {
+	h := newAutoHarness(t)
+	h.setupUpdate()
+	h.setupSystemd()
+	h.set("need_daemon_reload", "yes")
+
+	out, err := h.run()
+	if err != nil {
+		t.Fatalf("a refused layout must not fail the job: %v\n%s\n%s", err, out, h.messageLog())
+	}
+	h.requireNoMutation(t)
+	if h.has("systemctl --user stop") {
+		t.Fatalf("stale unit was stopped:\n%s", h.callsLog())
+	}
+	if !strings.Contains(h.messageLog(), "daemon-reload") {
+		t.Fatalf("stale unit state was not reported:\n%s", h.messageLog())
+	}
+}
+
+// The run lock must not live under the disposable cache.
+func TestAutoupdateLockSurvivesCacheCleanup(t *testing.T) {
+	h := newAutoHarness(t)
+	h.setupUpdate()
+	h.setupOpenRC()
+	state := filepath.Join(h.ws, ".update-state")
+	if err := os.MkdirAll(state, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := os.OpenFile(filepath.Join(state, "lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	// A cleanup removing the disposable cache must not unlink the held lock.
+	if err := os.RemoveAll(filepath.Join(h.ws, "cache")); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := h.run()
+	if err != nil {
+		t.Fatalf("second instance must be a no-op: %v\n%s", err, out)
+	}
+	if h.callsLog() != "" {
+		t.Fatalf("concurrent invocation made calls:\n%s", h.callsLog())
+	}
+	if _, err := os.Stat(filepath.Join(h.ws, "cache", "update", "lock")); err == nil {
+		t.Fatal("updater lock was placed under the disposable cache")
+	}
+}
+
+// A failed-tag marker in the persistent state survives cache cleanup.
+func TestAutoupdateFailedTagSurvivesCacheCleanup(t *testing.T) {
+	h := newAutoHarness(t)
+	h.setupUpdate()
+	h.setupOpenRC()
+	if err := os.MkdirAll(filepath.Join(h.ws, ".update-state"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	h.writeFile(filepath.Join(h.ws, ".update-state", "failed-v9.9.9"), "", 0o600)
+	if err := os.RemoveAll(filepath.Join(h.ws, "cache")); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := h.run()
+	if err != nil {
+		t.Fatalf("failed-tag skip must not fail the job: %v\n%s\n%s", err, out, h.callsLog())
+	}
+	h.requireNoMutation(t)
+	if _, err := os.Stat(filepath.Join(h.ws, ".update-state", "failed-v9.9.9")); err != nil {
+		t.Fatalf("failed-tag marker did not survive cleanup: %v", err)
+	}
+	if !strings.Contains(h.messageLog(), "skip: v9.9.9 already failed") {
+		t.Fatalf("failed-tag refusal was not logged:\n%s", h.messageLog())
 	}
 }

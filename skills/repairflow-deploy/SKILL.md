@@ -162,14 +162,21 @@ root-owned executable, and leaves restart separate. Pass only a trusted installe
 archive also ships `repairflow-update` and `repairflow-autoupdate`; consult their matching source
 and `docs/DEPLOY.md` before using them. Do not configure unattended activation without approval.
 
-`repairflow-autoupdate` is fail-closed: it verifies the unit's pinned binary and `--home`, stops
-the intended service before the backup and swap, and after the restart requires the configured
-endpoint to serve the new version and commit before reporting success. It never renames or restores
-the live workspace, never puts `<exe>.prev` back and never deletes backups. On failure it stops the
-candidate, marks the tag failed and logs `MANUAL RECOVERY` with the workspace, verified backup and
-`<exe>.prev` paths; recovery is a manual, separately authorized decision (restore targets an empty
+`repairflow-autoupdate` is fail-closed: it verifies the effective unit's pinned binary and `--home`
+(on systemd, the loaded `FragmentPath`; it refuses a unit that needs `daemon-reload`), stops the
+intended service before the backup and swap, and after the restart requires the configured endpoint
+to serve the exact `about-version`/`about-commit` values, the candidate's `doctor` to pass, and the
+record count to be unchanged before reporting success. Any HTTP response from the old endpoint
+counts as still listening; an ambiguous transport error also refuses the swap. It never renames or
+restores the live workspace, never puts `<exe>.prev` back and never deletes backups. On failure it
+stops the candidate if it can, marks the tag failed in `<workspace>/.update-state` (survives
+`repairflow cleanup`, not workspace destruction) and logs `MANUAL RECOVERY` with the observed
+service state, the restore point — called verified only after `backup verify` passed, otherwise an
+incomplete result not to be used — and `<exe>.prev`; a marker or stop failure is reported instead of
+being hidden. Recovery is a manual, separately authorized decision (restore targets an empty
 workspace). Treat a non-zero exit as a failed unattended operation and read
-`<workspace>/logs/update.log` before acting.
+`<workspace>/logs/update.log` before acting. The updater serializes cooperating runs only; keep
+other CLI writers out of the workspace while it runs.
 
 For offline signed updates, check first with
 `"$BIN" update check --manifest manifest.json --signature manifest.sig`, then use

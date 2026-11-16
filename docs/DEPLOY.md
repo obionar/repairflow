@@ -257,11 +257,13 @@ command to run, and the verified update still counts as applied.
 
 It follows GitHub's `latest`, which excludes prereleases, so it never moves itself onto a release
 candidate line; set `RF_UPDATE_TAG` to pin one explicitly. Before it does anything it refuses an
-unhealthy or busy workspace, a disk without room for the restore point, a candidate already marked
-failed, and any layout it cannot verify. Only the default service instance is supported: the
-installed unit or init script must pin the same binary and `--home` that this run uses, otherwise
-the script refuses and prints manual steps. `REPAIRFLOW_INITD` overrides `/etc/init.d` when the
-OpenRC script lives elsewhere.
+unhealthy workspace, an invalid `RF_UPDATE_TRIES`, a candidate already marked failed, a backup
+destination without room, and any layout it cannot verify. Only the default service instance is
+supported: the effective unit or init script must pin the same binary and `--home` that this run
+uses, otherwise the script refuses and prints manual steps. On systemd it reads the unit systemd
+actually loaded (`systemctl --user show --property=FragmentPath`) and refuses an unreadable unit or
+one that needs `daemon-reload`, so a stale or duplicate file at a guessed path cannot decide the
+run. `REPAIRFLOW_INITD` overrides `/etc/init.d` when the OpenRC script lives elsewhere.
 
 The run is fail-closed and has no automatic rollback:
 
@@ -269,23 +271,38 @@ The run is fail-closed and has no automatic rollback:
    probed as `127.0.0.1` or `::1`) and stops the detected service — `systemctl --user`, or
    non-interactive `doas -n`/`sudo -n rc-service` — before the backup and the binary swap.
 2. It refuses to continue when the stop fails, the service state is unknown, or the configured
-   endpoint still answers. A listener it did not start is left running, never killed.
+   endpoint still answers. Any HTTP response, including 401/403/404/500, counts as occupied;
+   only a definite connection refusal counts as free. A timeout or other transport error is
+   ambiguous and also refuses the swap. A listener it did not start is left running, never killed.
 3. It creates a verified backup in a fresh `mktemp` directory under `$HOME/backups` (outside the
-   workspace), applies the verified candidate and starts the same service.
-4. It reports success only when the configured `/login` answers, `/about` shows the new version and
-   commit, and the customer count is unchanged. A failing candidate is stopped again.
+   workspace), applies the verified candidate and starts the same service. The free-space check
+   runs against that backup filesystem, not the workspace parent, and the unique backup directory
+   is created before the stop.
+4. It reports success only when the configured `/login` answers, `/about` shows exactly the expected
+   version and commit in its `about-version`/`about-commit` fields, the candidate's `doctor` passes,
+   and the customer count is unchanged. A failing candidate is stopped again and marked failed.
 
 Nothing is renamed, restored or deleted automatically, because the schema is forward-only and the
-previous binary alone cannot undo a migration. On any failure after the stop, the log ends with
-`MANUAL RECOVERY` naming the untouched workspace, the verified backup, `<exe>.prev` and the failed
-tag; the tag is not retried. Recovery is a manual decision: inspect the log, and restore only into
-an empty/new workspace. Exit status is 0 for "nothing to do" and for a precondition refusal; it is
-non-zero when the stop, backup, apply or the post-restart health check failed. One instance runs at
-a time (`flock`), and every outcome is appended to `<workspace>/logs/update.log`.
+previous binary alone cannot undo a migration. On any failure after the stop, the log and stderr
+end with `MANUAL RECOVERY` naming the service state actually read back (stopped, running or
+unknown), whether the candidate was applied, the failed tag's marker status, the restore point —
+labelled verified only after `backup verify` succeeded, otherwise as an incomplete result that must
+not be used — and the untouched workspace with `<exe>.prev`. If the marker cannot be written the
+message says so instead of promising that the tag is suppressed. Recovery is a manual decision:
+inspect the log, and restore only into an empty/new workspace. Exit status is 0 for "nothing to do"
+and for a precondition refusal; it is non-zero when the stop, backup, apply or the post-restart
+health check failed. One cooperating instance runs at a time (`flock`); the script cannot detect an
+external CLI writer, so keep other writers out of the workspace for the run. Every outcome is
+appended to `<workspace>/logs/update.log`.
 
-`$HOME/backups/pre-*.rfbak` is never pruned automatically; retention is the operator's decision.
-Keep those restore points outside the workspace. The post-restart health check retries for about
-30 seconds; `RF_UPDATE_TRIES` overrides the number of attempts (two seconds apart).
+The run lock and failed-tag markers live in `<workspace>/.update-state` (mode 0700), a persistent
+directory outside `cache/` and `run/`, because `repairflow cleanup` may remove those. The directory
+is never migrated or deleted automatically, and destroying the whole workspace also discards it.
+
+Restore points are `$HOME/backups/pre-TAG-STAMP.XXXXXX/repairflow.rfbak` and are never pruned
+automatically; retention is the operator's decision. Keep those restore points outside the
+workspace. The post-restart health check retries for up to `RF_UPDATE_TRIES` attempts
+(default 15, accepted range 1–600) two seconds apart.
 
 The equivalent systemd user timer, if the host has one:
 
