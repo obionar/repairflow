@@ -162,6 +162,15 @@ root-owned executable, and leaves restart separate. Pass only a trusted installe
 archive also ships `repairflow-update` and `repairflow-autoupdate`; consult their matching source
 and `docs/DEPLOY.md` before using them. Do not configure unattended activation without approval.
 
+`repairflow-autoupdate` is fail-closed: it verifies the unit's pinned binary and `--home`, stops
+the intended service before the backup and swap, and after the restart requires the configured
+endpoint to serve the new version and commit before reporting success. It never renames or restores
+the live workspace, never puts `<exe>.prev` back and never deletes backups. On failure it stops the
+candidate, marks the tag failed and logs `MANUAL RECOVERY` with the workspace, verified backup and
+`<exe>.prev` paths; recovery is a manual, separately authorized decision (restore targets an empty
+workspace). Treat a non-zero exit as a failed unattended operation and read
+`<workspace>/logs/update.log` before acting.
+
 For offline signed updates, check first with
 `"$BIN" update check --manifest manifest.json --signature manifest.sig`, then use
 `"$BIN" update apply --file /ABS/staged/repairflow --manifest manifest.json --signature manifest.sig --confirm`.

@@ -257,12 +257,35 @@ command to run, and the verified update still counts as applied.
 
 It follows GitHub's `latest`, which excludes prereleases, so it never moves itself onto a release
 candidate line; set `RF_UPDATE_TAG` to pin one explicitly. Before it does anything it refuses an
-unhealthy or busy workspace and a disk without room for the restore point. It then takes a verified
-backup **outside** the workspace, applies the update, and checks the health of the result — schema
-open, `doctor`, record counts and the login page. On any failure it restores that backup (the schema
-is forward-only, so the previous binary alone cannot undo a migration), puts `<exe>.prev` back, and
-records the tag so it is not retried. One instance runs at a time (`flock`), every path exits 0, and
-the outcome is appended to `<workspace>/logs/update.log`.
+unhealthy or busy workspace, a disk without room for the restore point, a candidate already marked
+failed, and any layout it cannot verify. Only the default service instance is supported: the
+installed unit or init script must pin the same binary and `--home` that this run uses, otherwise
+the script refuses and prints manual steps. `REPAIRFLOW_INITD` overrides `/etc/init.d` when the
+OpenRC script lives elsewhere.
+
+The run is fail-closed and has no automatic rollback:
+
+1. It reads the effective `web.host`/`web.port` from `config check --json` (a wildcard address is
+   probed as `127.0.0.1` or `::1`) and stops the detected service — `systemctl --user`, or
+   non-interactive `doas -n`/`sudo -n rc-service` — before the backup and the binary swap.
+2. It refuses to continue when the stop fails, the service state is unknown, or the configured
+   endpoint still answers. A listener it did not start is left running, never killed.
+3. It creates a verified backup in a fresh `mktemp` directory under `$HOME/backups` (outside the
+   workspace), applies the verified candidate and starts the same service.
+4. It reports success only when the configured `/login` answers, `/about` shows the new version and
+   commit, and the customer count is unchanged. A failing candidate is stopped again.
+
+Nothing is renamed, restored or deleted automatically, because the schema is forward-only and the
+previous binary alone cannot undo a migration. On any failure after the stop, the log ends with
+`MANUAL RECOVERY` naming the untouched workspace, the verified backup, `<exe>.prev` and the failed
+tag; the tag is not retried. Recovery is a manual decision: inspect the log, and restore only into
+an empty/new workspace. Exit status is 0 for "nothing to do" and for a precondition refusal; it is
+non-zero when the stop, backup, apply or the post-restart health check failed. One instance runs at
+a time (`flock`), and every outcome is appended to `<workspace>/logs/update.log`.
+
+`$HOME/backups/pre-*.rfbak` is never pruned automatically; retention is the operator's decision.
+Keep those restore points outside the workspace. The post-restart health check retries for about
+30 seconds; `RF_UPDATE_TRIES` overrides the number of attempts (two seconds apart).
 
 The equivalent systemd user timer, if the host has one:
 

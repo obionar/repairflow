@@ -1,91 +1,260 @@
 #!/bin/sh
-# repairflow-autoupdate — unattended, reversible, idempotent.
+# repairflow-autoupdate — unattended, fail-closed update of one installed service.
 #
-# Run it from cron or a systemd timer. It exits 0 when there is nothing to do, when the
-# candidate is refused, and when it rolled back; a non-zero exit means the job itself is broken.
-# The channel is GitHub's "latest", which excludes prereleases by definition, so an unattended
-# run never jumps to a release candidate. Set RF_UPDATE_TAG to pin one explicitly.
+# Run it from cron or a systemd timer. Exit 0 means nothing needed doing, or a
+# precondition refused the candidate before anything was changed. A non-zero exit
+# means a stop, backup, apply or post-restart health check failed; the service is
+# then left stopped for a human. This script never renames or restores the live
+# workspace, never puts <exe>.prev back automatically and never deletes backups:
+# recovery is manual and the log says exactly what was preserved.
+#
+# The channel is GitHub's "latest", which excludes prereleases by definition, so an
+# unattended run never jumps to a release candidate. Set RF_UPDATE_TAG to pin one.
+# Only the default service instance is supported: the unit's pinned binary and
+# --home must match this run, otherwise the script refuses and prints manual steps.
 set -eu
 home=${REPAIRFLOW_HOME:-$HOME/.repairflow}
 # cron has a minimal PATH: resolve the binary once, with the default install dir as fallback.
 bin=${REPAIRFLOW_BIN:-$(command -v repairflow || true)}
 [ -n "$bin" ] || bin=$HOME/.local/bin/repairflow
 [ -x "$bin" ] || { echo "repairflow-autoupdate: repairflow not found (set REPAIRFLOW_BIN)" >&2; exit 1; }
+# The fetcher must replace the binary the unit runs, not whichever one it finds.
+REPAIRFLOW_BIN=$bin
+export REPAIRFLOW_BIN
 fetch=$(command -v repairflow-update || true)
 [ -n "$fetch" ] || fetch=$HOME/.local/bin/repairflow-update
 [ -x "$fetch" ] || { echo "repairflow-autoupdate: repairflow-update not found" >&2; exit 1; }
 state=$home/cache/update
 log=$home/logs/update.log
-mkdir -p "$state" "$home/logs"
-say() { printf '%s %s\n' "$(date -Is)" "$*" >>"$log"; }
-restart_service() {
-  systemctl --user restart repairflow.service 2>/dev/null && return 0
-  for p in doas sudo; do
-    command -v "$p" >/dev/null 2>&1 && "$p" rc-service repairflow restart 2>/dev/null && return 0
-  done
-  return 1
+mkdir -p "$state" "$home/logs" 2>/dev/null || {
+  echo "repairflow-autoupdate: cannot create $state or $home/logs" >&2; exit 1; }
+# A failed log write must never abort an update or hide a failure: fall back to stderr.
+say() {
+  line="$(date -Is) $*"
+  printf '%s\n' "$line" >>"$log" 2>/dev/null || printf '%s\n' "$line" >&2
 }
+# A refusal happens before anything changes and keeps the job exit 0.
+refuse() { say "refuse: $*"; exit 0; }
+# A failure exits non-zero so the scheduler surfaces it.
+fail() { say "abort: $*"; exit 1; }
+
+cand=
+bkp=
+stopped=0
+finished=0
+# Interruption or an unexpected error after the stop still leaves one truthful
+# message about how to recover; it never touches the workspace.
+trap 'exit 130' HUP INT TERM
+# shellcheck disable=SC2016
+trap 'rc=$?
+if [ "$rc" != 0 ] && [ "$finished" != 1 ]; then
+  say "failed: exit status $rc without success"
+fi
+if [ "$finished" != 1 ] && [ "$stopped" = 1 ]; then
+  msg="MANUAL RECOVERY: repairflow is stopped; workspace $home was not moved or restored; verified pre-update backup: ${bkp:-none}; previous binary: $bin.prev; candidate ${cand:-unknown} is marked failed and will not be retried; restart manually after fixing the cause"
+  say "$msg"
+  printf "%s\n" "$msg" >&2
+fi' EXIT
 
 # One run at a time; a second invocation is a no-op, never a concurrent writer.
-exec 9>"$state/lock"; flock -n 9 || exit 0
+exec 9>"$state/lock"
+flock -n 9 || exit 0
 
 # Never update a workspace that is not healthy, and never while another writer holds it.
 "$bin" --home "$home" doctor >/dev/null || { say "skip: workspace unhealthy"; exit 0; }
 "$bin" --home "$home" status >/dev/null 2>&1 || { say "skip: workspace busy"; exit 0; }
 
 # The channel is GitHub's "latest": one HEAD request, no API, no token, no jq.
-cand=${RF_UPDATE_TAG:-$(curl -fsSI https://github.com/obionar/repairflow/releases/latest 2>/dev/null |
-       tr -d '\r' | sed -n 's|^[Ll]ocation: .*/tag/\(v[^ /]*\)$|\1|p')}
-[ -n "$cand" ] || { say "skip: cannot resolve latest release"; exit 0; }
+if [ -n "${RF_UPDATE_TAG:-}" ]; then
+  cand=$RF_UPDATE_TAG
+else
+  latest=$(curl -fsSI -m 15 https://github.com/obionar/repairflow/releases/latest 2>/dev/null) || latest=
+  cand=$(printf '%s\n' "$latest" | tr -d '\r' |
+         sed -n 's|^[Ll]ocation: .*/tag/\(v[^ /]*\)$|\1|p')
+  [ -n "$cand" ] || { say "skip: cannot resolve latest release"; exit 0; }
+fi
+# The tag becomes a file name below, so accept only the release-tag grammar.
+case $cand in *[!0-9A-Za-z.+-]*) refuse "unexpected candidate tag '$cand'";; esac
 check=$("$fetch" "$cand" 2>&1) || { say "skip: $cand not installable here"; exit 0; }
-printf '%s\n' "$check" >>"$log"
+say "check: $check"
 case $check in *"up to date"*) say "noop: up to date"; exit 0;; esac
-[ -f "$state/failed-$cand" ] && { say "skip: $cand already failed"; exit 0; }
+if [ -f "$state/failed-$cand" ]; then say "skip: $cand already failed"; exit 0; fi
 
 # Disk: room for the restore point, the archive and the restored copy.
-need=$(( $(du -sk "$home" | cut -f1) * 3 + 200000 ))
-avail=$(df -Pk "$(dirname "$home")" | awk 'NR==2{print $4}')
-[ "$avail" -gt "$need" ] || { say "skip: only ${avail}K free, need ${need}K"; exit 0; }
+used=$(du -sk "$home" 2>/dev/null | cut -f1)
+case $used in ''|*[!0-9]*) refuse "cannot size workspace $home";; esac
+need=$(( used * 3 + 200000 ))
+avail=$(df -Pk "$(dirname "$home")" 2>/dev/null | awk 'NR==2{print $4}')
+case $avail in ''|*[!0-9]*) refuse "cannot determine free space for the restore point";; esac
+[ "$avail" -gt "$need" ] || refuse "only ${avail}K free, need ${need}K"
 
-# The restore point, verified, outside the workspace. Nothing proceeds without it: the
-# schema is forward-only, so the previous binary alone cannot undo a migration.
-stamp=$(date +%Y%m%dT%H%M%S)
-bkp=$HOME/backups/pre-$cand-$stamp.rfbak
-mkdir -p "$HOME/backups"
-if ! "$bin" --home "$home" backup create --output "$bkp" >>"$log" 2>&1 ||
-   ! "$bin" backup verify "$bkp" >>"$log" 2>&1; then
-  say "abort: pre-update backup failed"; rm -f "$bkp"; exit 0
+# Read the effective listener from the trusted installed binary; never re-parse TOML.
+cfg=$("$bin" config check --home "$home" --json 2>/dev/null) ||
+  refuse "cannot read the effective configuration; update manually"
+host=$(printf '%s\n' "$cfg" | sed -n 's/.*"Web":{"Host":"\([^"]*\)".*/\1/p' | head -n 1)
+port=$(printf '%s\n' "$cfg" | sed -n 's/.*"Web":{"Host":"[^"]*","Port":\([0-9]*\).*/\1/p' | head -n 1)
+case $host in ''|*[!0-9A-Za-z.:_-]*) refuse "ambiguous web.host '$host' in the effective configuration";; esac
+case $port in ''|*[!0-9]*) refuse "ambiguous web.port '$port' in the effective configuration";; esac
+[ "$port" -ge 1 ] && [ "$port" -le 65535 ] || refuse "web.port $port is out of range"
+case $host in
+  0.0.0.0|'*') host=127.0.0.1;;
+  ::|'[::]') host='[::1]';;
+esac
+case $host in *:*) case $host in \[*\]) ;; *) host="[$host]";; esac;; esac
+base=http://$host:$port
+
+# Record counts prove the candidate did not lose data.
+pre=$("$bin" --home "$home" --json customer list --per-page 1 2>/dev/null) ||
+  refuse "cannot read record counts before the update; update manually"
+before=$(printf '%s\n' "$pre" | sed -n 's/.*"total":\([0-9]*\).*/\1/p' | head -n 1)
+[ -n "$before" ] || refuse "cannot parse the record count before the update; update manually"
+
+# Resolve the one service this workspace is installed as, before changing anything.
+# Unsupported layouts are refused instead of guessed at.
+initd=${REPAIRFLOW_INITD:-/etc/init.d}
+unquote() { v=$1; case $v in \"*\") v=${v#\"}; v=${v%\"};; esac; printf '%s' "$v"; }
+if command -v systemctl >/dev/null 2>&1; then
+  init=systemd
+  unit=$HOME/.config/systemd/user/repairflow.service
+  [ -f "$unit" ] || refuse "no systemd user unit at $unit; run 'repairflow service install' or update manually"
+  exec_line=$(sed -n 's/^ExecStart=//p' "$unit" | head -n 1)
+  workdir=$(unquote "$(sed -n 's/^WorkingDirectory=//p' "$unit" | head -n 1)")
+  case $exec_line in
+    "$bin serve --home $home"|"\"$bin\" serve --home \"$home\"") ;;
+    *) refuse "unit ExecStart does not pin '$bin serve --home $home'; update manually";;
+  esac
+  [ "$workdir" = "$home" ] || refuse "unit WorkingDirectory is '$workdir', not '$home'; update manually"
+  priv=
+elif [ -f "$initd/repairflow" ]; then
+  init=openrc
+  unit_bin=$(unquote "$(sed -n 's/^command=//p' "$initd/repairflow" | head -n 1)")
+  unit_args=$(unquote "$(sed -n 's/^command_args=//p' "$initd/repairflow" | head -n 1)")
+  [ "$unit_bin" = "$bin" ] || refuse "OpenRC script runs '$unit_bin', not '$bin'; update manually"
+  [ "$unit_args" = "serve --home $home" ] || refuse "OpenRC script serves '$unit_args', not --home $home; update manually"
+  if [ "$(id -u)" = 0 ]; then
+    priv=
+  elif command -v doas >/dev/null 2>&1; then
+    priv=doas
+  elif command -v sudo >/dev/null 2>&1; then
+    priv=sudo
+  else
+    refuse "cannot stop/start the OpenRC service without root, doas or sudo; update manually"
+  fi
+else
+  refuse "no repairflow service found (systemd user unit or $initd/repairflow); update manually"
 fi
-before=$("$bin" --home "$home" --json customer list --per-page 1 | sed -n 's/.*"total":\([0-9]*\).*/\1/p')
 
-# Apply. The binary verifies signature, hash and platform, refuses a same-version or older
-# candidate, and keeps <exe>.prev.
-if ! "$fetch" "$cand" --apply >>"$log" 2>&1; then
+svc() {
+  if [ "$init" = systemd ]; then systemctl --user "$@" repairflow.service; else
+    if [ -n "$priv" ]; then "$priv" -n rc-service repairflow "$@"; else rc-service repairflow "$@"; fi
+  fi
+}
+# Every service command's outcome is logged; a broken log must not hide it.
+svc_log() {
+  if out=$(svc "$@" 2>&1); then
+    [ -n "$out" ] && say "$init $*: $out"
+    return 0
+  fi
+  say "$init $* failed: $out"
+  return 1
+}
+run_log() {
+  if out=$("$@" 2>&1); then
+    [ -n "$out" ] && say "ok: $*"
+    return 0
+  fi
+  say "failed: $*: $out"
+  return 1
+}
+service_state() {
+  if [ "$init" = systemd ]; then
+    out=$(systemctl --user is-active repairflow.service 2>/dev/null) || true
+    case $out in active|activating) echo running;; inactive|failed) echo stopped;; *) echo unknown;; esac
+  else
+    if out=$(svc status 2>&1); then echo running; else
+      case $out in *"status: stopped"*) echo stopped;; *) echo unknown;; esac
+    fi
+  fi
+}
+probe() { curl -fsS -m 5 -o /dev/null "$base/$1" >/dev/null 2>&1; }
+# A failed candidate is stopped and marked; nothing is restored or renamed.
+reject_candidate() {
   : >"$state/failed-$cand"
-  say "abort: $cand not applied (refused or failed); nothing replaced"
-  rm -f "$bkp"
-  exit 0
+  svc_log stop || say "warn: could not stop the $cand candidate; stop it manually"
+  fail "$*"
+}
+
+# Stop the intended service before the binary swap, so no old process keeps the
+# database open and no candidate migrates it behind a live server.
+say "apply: $cand (stopping $init repairflow first)"
+svc_log stop || fail "cannot stop $init repairflow; nothing was applied and the workspace is untouched"
+after_state=$(service_state)
+[ "$after_state" = stopped ] ||
+  fail "service state is '$after_state' after stop; refusing to swap the binary (nothing was applied)"
+stopped=1
+if probe login; then
+  fail "$base/login still answers after stop; refusing to swap the binary (the listener was left alone)"
 fi
 
-# The health check is the verdict, not the exit code: open the schema, then re-read.
-"$bin" --home "$home" customer list --per-page 1 >/dev/null 2>&1 || true
-after=$("$bin" --home "$home" --json customer list --per-page 1 | sed -n 's/.*"total":\([0-9]*\).*/\1/p')
-healthy=$("$bin" --home "$home" doctor >/dev/null 2>&1 && echo yes || echo no)
-web=$(curl -fsS -o /dev/null -m 5 http://127.0.0.1:8091/login && echo yes || echo no)
-
-if [ "$healthy" = yes ] && [ "$before" = "$after" ]; then
-  say "ok: $cand installed ($before customers), web=$web"
-  restart_service || say "RESTART NEEDED: the service still runs the previous binary"
-  ls -1t "$HOME"/backups/pre-*.rfbak 2>/dev/null | tail -n +4 | xargs -r rm -f
-  exit 0
+# The restore point, verified, outside the workspace. Nothing proceeds without it;
+# the schema is forward-only, so the previous binary alone cannot undo a migration.
+mkdir -p "$HOME/backups" || fail "cannot create $HOME/backups for the restore point"
+stamp=$(date +%Y%m%dT%H%M%S)
+bdir=$(mktemp -d "$HOME/backups/pre-$cand-$stamp.XXXXXX") ||
+  fail "cannot create a unique backup directory under $HOME/backups"
+bkp=$bdir/repairflow.rfbak
+if ! run_log "$bin" --home "$home" backup create --output "$bkp" ||
+   ! run_log "$bin" backup verify "$bkp"; then
+  fail "pre-update backup failed; nothing was applied; the incomplete backup is at $bkp"
 fi
 
-# Rollback: restore the pre-update workspace and put the previous binary back.
-say "rollback: health=$healthy counts ${before:-?}->${after:-?}"
-systemctl --user stop repairflow.service 2>/dev/null || true
-mv "$home" "$home.broken-$stamp"
-"$bin" restore "$bkp" --home "$home" >>"$log" 2>&1 || say "MANUAL: restore failed, backup at $bkp"
-[ -f "$bin.prev" ] && mv -f "$bin.prev" "$bin"
-restart_service || say "RESTART NEEDED after rollback"
-: >"$state/failed-$cand"
-say "rolled back to the previous version; $cand will not be retried"
+# Apply. The binary verifies signature, hash and platform, refuses a same-version or
+# older candidate, and keeps <exe>.prev.
+if ! run_log "$fetch" "$cand" --apply; then
+  : >"$state/failed-$cand"
+  fail "$cand was not applied (refused or failed); the previous binary, the workspace and $bkp are intact"
+fi
+
+# The candidate's own identity is the expected health target.
+vjson=$("$bin" version --json 2>/dev/null) ||
+  reject_candidate "cannot read the installed version after apply"
+want_version=$(printf '%s\n' "$vjson" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p' | head -n 1)
+want_commit=$(printf '%s\n' "$vjson" | sed -n 's/.*"commit":"\([^"]*\)".*/\1/p' | head -n 1)
+[ -n "$want_version" ] && [ -n "$want_commit" ] ||
+  reject_candidate "cannot parse the installed version after apply"
+[ "v$want_version" = "$cand" ] ||
+  reject_candidate "applied candidate is $cand but the binary reports version $want_version"
+
+svc_log start || reject_candidate "$init repairflow did not start the $cand candidate"
+after_state=$(service_state)
+[ "$after_state" = running ] ||
+  reject_candidate "service state is '$after_state' after starting $cand"
+
+# The health check is the verdict: the configured endpoint, the candidate's version
+# and commit, and the record count all have to agree. Bounded retries cover startup.
+tries=${RF_UPDATE_TRIES:-15}
+n=0
+healthy=0
+while [ "$n" -lt "$tries" ]; do
+  n=$((n + 1))
+  if probe login; then
+    about=$(curl -fsS -m 5 "$base/about" 2>/dev/null) || about=
+    case $about in
+      *"$want_version"*) case $about in *"$want_commit"*) healthy=1;; esac;;
+    esac
+  fi
+  [ "$healthy" = 1 ] && break
+  [ "$n" -lt "$tries" ] && sleep 2
+done
+[ "$healthy" = 1 ] ||
+  reject_candidate "$cand does not serve version $want_version commit $want_commit at $base"
+
+post=$("$bin" --home "$home" --json customer list --per-page 1 2>/dev/null)
+[ -n "$post" ] || reject_candidate "cannot read record counts from the $cand candidate"
+after=$(printf '%s\n' "$post" | sed -n 's/.*"total":\([0-9]*\).*/\1/p' | head -n 1)
+[ "$after" = "$before" ] ||
+  reject_candidate "record count changed ${before}->${after:-?} under $cand"
+
+finished=1
+say "ok: $cand installed and healthy (version $want_version, commit $want_commit, $base, $after customers); backup kept at $bkp; no backups were deleted"
+exit 0
