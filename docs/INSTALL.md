@@ -34,9 +34,12 @@ and each workspace database migrates automatically on the next command or
 start, from any supported previous version. Restart a running RepairFlow
 service separately to pick up the new binary. For a schema-changing upgrade, take and verify a backup
 first and stop the service before the new binary opens the workspace; an executable-only rollback
-does not revert a migrated schema. If the service was installed from
-an older path such as `~/.local/bin/repairflow`, rerun `repairflow service
-install --home /absolute/workspace` so the unit uses the new binary path.
+does not revert a migrated schema. Binary replacement does not refresh service units or update
+helpers automatically. If the binary path or generated unit template changes, **stop the service
+using the old unit first**, then run the new binary's `service install --no-enable --home
+/absolute/workspace --init openrc` (or `--init systemd`), inspect the replacement and start the
+service. Installing `/etc/init.d` still needs `doas`/`sudo`; user-owned binary replacement does not.
+Do not replace a running unit before stopping it: old and new supervisor stop semantics may differ.
 
 ### From a release archive
 

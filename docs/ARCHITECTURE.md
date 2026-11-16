@@ -97,7 +97,7 @@ or configuration created by a newer schema version is refused rather than downgr
 | v10 `label_printer` | One workspace-wide label-printer choice; empty driver means printing is off |
 
 `schema_migrations` tracks applied versions. `init` explicitly opens and migrates the database (as
-do domain commands), while read-only `doctor` only reports a missing or outdated schema. `doctor`
+do domain commands), while `doctor` reports a missing or outdated schema without migrating or modifying records. `doctor`
 runs database integrity and foreign-key checks and hash-verifies every retained attachment against
 its stored size and SHA-256, reporting missing bytes or changed content. Revisions are derived from
 current content, not stored as independent version numbers.

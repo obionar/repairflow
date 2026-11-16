@@ -70,7 +70,7 @@ and accounts; newer schemas are still refused. `--language` is applied only when
 config: on an existing workspace it is ignored, JSON reports `ignored:["language"]` when supplied,
 and human output says the existing language was kept.
 
-`doctor` remains read-only: it reports a missing or outdated schema instead of migrating it, and
+`doctor` does not migrate or modify records: it reports a missing or outdated schema, and
 checks workspace, database integrity, records, demo marker and the stored attachment bytes (size and
 SHA-256, so a large gallery takes longer). `cleanup` removes stale upload staging and cache only; it
 never removes business records, attachments, configuration, backups or recovery data.
