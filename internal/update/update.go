@@ -61,6 +61,23 @@ func ParsePublicKey(hexKey string) (ed25519.PublicKey, error) {
 	return ed25519.PublicKey(raw), nil
 }
 
+// VerifyDetached checks a detached Ed25519 signature over arbitrary bytes.
+// It is used for the signed release checksum list, which authenticates the
+// files a manifest does not cover (LICENSE and the operator update scripts).
+func VerifyDetached(pub ed25519.PublicKey, data, sig []byte) error {
+	if len(pub) != ed25519.PublicKeySize {
+		return errs.New(errs.CodeValidation, "no trusted release key is embedded in this build")
+	}
+	sigBytes, err := hex.DecodeString(strings.TrimSpace(string(sig)))
+	if err != nil {
+		return errs.New(errs.CodeValidation, "signature must be hex-encoded")
+	}
+	if !ed25519.Verify(pub, data, sigBytes) {
+		return errs.New(errs.CodeValidation, "release signature is invalid")
+	}
+	return nil
+}
+
 // VerifyManifest checks the detached Ed25519 signature over the manifest
 // bytes and validates the manifest's internal consistency.
 func VerifyManifest(manifestBytes, sig []byte, pub ed25519.PublicKey) (*Manifest, error) {

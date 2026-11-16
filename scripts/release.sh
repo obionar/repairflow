@@ -161,5 +161,17 @@ scripts/package-release.sh \
   --update-script scripts/repairflow-update \
   --update-script scripts/repairflow-autoupdate
 
+# The signed manifest covers only the binaries. Sign the checksum list too, so
+# the helper scripts and LICENSE inside the archives are authenticated by the
+# same key before anything is extracted or installed.
+"$BUILD/repairflow-amd64" update sign --key "$KEY" --manifest "$OUT/SHA256SUMS" \
+  --out "$OUT/SHA256SUMS.sig" >/dev/null
+[ -s "$OUT/SHA256SUMS.sig" ] || { echo "release: checksum signing produced no signature" >&2; exit 1; }
+# Prove it against the public key embedded in the built binary.
+"$BUILD/repairflow-amd64" update verify --file "$OUT/SHA256SUMS" \
+  --signature "$OUT/SHA256SUMS.sig" >/dev/null || {
+  echo "release: the checksum signature was not accepted by the embedded public key" >&2; exit 1; }
+echo "release: SHA256SUMS signature verified"
+
 count=$(wc -l < "$OUT/SHA256SUMS")
-echo "release: PASS — $VERSION in $OUT ($count installable archives)"
+echo "release: PASS — $VERSION in $OUT ($count installable archives, signed checksum list)"

@@ -6,7 +6,8 @@ There is no database server, application runtime or outbound network dependency.
 ## Target requirements
 
 - Linux x86-64 (`amd64`) or ARM64 (`arm64`).
-- An operator account that owns the workspace; the default binary is root-owned.
+- An operator account that owns the workspace; the default binary lives in `~/.local/bin`, owned by
+  that account.
 - Enough local storage for the binary, database, attachments and backups.
 - `systemd` for a user service, or OpenRC for a system service. Foreground operation needs neither.
 
@@ -15,14 +16,14 @@ a workspace between machines.
 
 ## Copy and install
 
-Copy the archive for the target architecture and `SHA256SUMS` to the machine:
+Copy the archive for the target architecture, `SHA256SUMS` and `SHA256SUMS.sig` to the machine:
 
 ```bash
-scp repairflow_Linux_x86_64.tar.gz SHA256SUMS technician@host:~/
+scp repairflow_Linux_x86_64.tar.gz SHA256SUMS SHA256SUMS.sig technician@host:~/
 ```
 
-Then verify, extract and install exactly as
-[Install and first run](INSTALL.md#install-the-executable) describes, and keep `LICENSE`,
+Then authenticate the checksum list, verify the archive, extract and install exactly as
+[Install and first run](INSTALL.md#from-a-release-archive) describes, and keep `LICENSE`,
 `manifest.json` and `manifest.sig` from the archive with the installation.
 Use the same guide to initialize a workspace and create the first admin; to move existing records
 instead, use [Move a workspace](#move-a-workspace) below.

@@ -43,11 +43,14 @@ It writes exactly these release assets:
 repairflow_Linux_x86_64.tar.gz
 repairflow_Linux_arm64.tar.gz
 SHA256SUMS
+SHA256SUMS.sig
 ```
 
 Each archive contains exactly `repairflow`, `LICENSE`, `manifest.json`, `manifest.sig`,
 `update-github.sh`, `repairflow-update` and `repairflow-autoupdate`. `SHA256SUMS` covers both
-archives. Do not upload loose binaries, docs, manifests or demo scripts as separate release assets.
+archives and is signed (`SHA256SUMS.sig`), because the manifest covers only the binaries; verify it
+before extracting so the helper scripts and `LICENSE` are authenticated too. Do not upload loose
+binaries, docs, manifests or demo scripts as separate release assets.
 GitHub-generated source archives at the matching tag provide corresponding source for that build;
 preserve source availability for distributed or modified builds too. Never put signing keys,
 build output or release directories in git. Keep private keys out of chat/logs and backed up offline;
@@ -55,13 +58,17 @@ operators installing a signed release do not need the publisher's private key.
 
 ## Verify and install
 
-Copy/download both archives and `SHA256SUMS` from the approved release into a fresh staging
-directory, then run there (BusyBox has no `--ignore-missing`):
+Copy/download the target archive, `SHA256SUMS` and `SHA256SUMS.sig` from the approved release into a
+fresh staging directory, then authenticate and verify there (BusyBox has no `--ignore-missing`):
 
 ```bash
-sha256sum -c SHA256SUMS
-# choose arm64 instead on an ARM64 target
-tar -xzf repairflow_Linux_x86_64.tar.gz
+# With an installed binary: verify the signed list against its embedded key.
+repairflow update verify --file SHA256SUMS --signature SHA256SUMS.sig
+# First install has no binary yet: compare the published fingerprint and verify with openssl, or
+# check only the archive you downloaded (a bare checksum pass is not authentication).
+grep '  repairflow_Linux_arm64.tar.gz$' SHA256SUMS > SHA256SUMS.one
+sha256sum -c SHA256SUMS.one
+tar -xzf repairflow_Linux_arm64.tar.gz
 BIN_DIR="$HOME/.local/bin"
 mkdir -p "$BIN_DIR"
 install -m 0755 repairflow update-github.sh repairflow-update repairflow-autoupdate "$BIN_DIR/"

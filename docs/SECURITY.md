@@ -53,6 +53,14 @@ before storing sensitive customer data.
   executable. Updates re-read the installed version under that lock before applying version policy.
   Replacing a root-owned `/usr/local/bin/repairflow` requires `sudo`/`doas`; the default
   `~/.local/bin/repairflow` belongs to the operator and needs neither.
+- `SHA256SUMS` ships with a detached Ed25519 signature (`SHA256SUMS.sig`) because `manifest.json`
+  covers only the binaries: the signature authenticates `LICENSE` and the operator update scripts in
+  the archive. Verify the list before extracting or installing; an installed binary can do that with
+  `update verify`. The first download still relies on the release host and the published key
+  fingerprint.
+- `GET /about` is public and shows the build version, commit, licence and the source URL compiled
+  into the build (`-X repairflow/internal/buildinfo.SourceURL=...`). Operators who distribute a
+  modified build must point that URL at the Corresponding Source of their version.
 - The application makes no outbound network requests during ordinary use. The optional
   `scripts/update-github.sh` accesses GitHub only when the operator invokes it, extracts only the
   expected files from the platform archive, and still requires the installed binary to verify the

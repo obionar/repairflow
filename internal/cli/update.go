@@ -19,7 +19,7 @@ import (
 // local-file only. No network access and no script execution anywhere.
 func runUpdate(ctx context.Context, opts options, args []string, getenv Env) (any, error) {
 	if len(args) == 0 {
-		return nil, errs.New(errs.CodeUsage, "usage: repairflow update <check|apply|keygen|sign> ...")
+		return nil, errs.New(errs.CodeUsage, "usage: repairflow update <check|apply|verify|keygen|sign> ...")
 	}
 	sub, rest := args[0], args[1:]
 
@@ -72,6 +72,27 @@ func runUpdate(ctx context.Context, opts options, args []string, getenv Env) (an
 			CurrentVersion: buildinfo.Get().Version,
 		})
 
+	case "verify":
+		p, err := parseArgs(rest, []string{"file", "signature"}, nil)
+		if err != nil {
+			return nil, err
+		}
+		if err := requirePositional(p, 0, "repairflow update verify --file SHA256SUMS --signature SHA256SUMS.sig"); err != nil {
+			return nil, err
+		}
+		pub, err := releaseKey()
+		if err != nil {
+			return nil, err
+		}
+		data, sig, err := readReleaseFiles(p.get("file"), p.get("signature"))
+		if err != nil {
+			return nil, err
+		}
+		if err := update.VerifyDetached(pub, data, sig); err != nil {
+			return nil, err
+		}
+		return verifyResult{File: p.get("file"), SignatureFile: p.get("signature")}, nil
+
 	case "keygen":
 		p, err := parseArgs(rest, []string{"out"}, nil)
 		if err != nil {
@@ -97,7 +118,7 @@ func runUpdate(ctx context.Context, opts options, args []string, getenv Env) (an
 		return signManifest(p.get("key"), p.get("manifest"), p.get("out"))
 
 	default:
-		return nil, errs.New(errs.CodeUsage, "unknown update subcommand %q (supported: check, apply, keygen, sign)", sub)
+		return nil, errs.New(errs.CodeUsage, "unknown update subcommand %q (supported: check, apply, verify, keygen, sign)", sub)
 	}
 }
 
@@ -130,6 +151,12 @@ type keygenResult struct {
 	PrivateKeyFile string `json:"private_key_file"`
 	PublicKeyHex   string `json:"public_key_hex"`
 	Warning        string `json:"warning"`
+}
+
+type verifyResult struct {
+	File          string `json:"file"`
+	SignatureFile string `json:"signature_file"`
+	Verified      bool   `json:"verified"`
 }
 
 type signResult struct {

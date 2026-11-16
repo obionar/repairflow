@@ -40,17 +40,42 @@ install --home /absolute/workspace` so the unit uses the new binary path.
 
 ### From a release archive
 
-Download both archives and `SHA256SUMS` from the GitHub release, then check them together:
+Download the archive for this machine, the signed checksum list and its signature, then
+authenticate the list before extracting anything. `TAG` is the exact release tag; the release
+public-key fingerprint is published with the release.
 
 ```bash
-sha256sum -c SHA256SUMS
-tar -xzf repairflow_Linux_x86_64.tar.gz
+TAG=v0.2.0-rc5
+ASSET=repairflow_Linux_arm64.tar.gz          # repairflow_Linux_x86_64.tar.gz on amd64
+BASE=https://github.com/obionar/repairflow/releases/download/$TAG
+wget -q "$BASE/$ASSET" "$BASE/SHA256SUMS" "$BASE/SHA256SUMS.sig"
+
+# 1. Authenticate SHA256SUMS with the published 64-hex-character release key.
+PUB=0000000000000000000000000000000000000000000000000000000000000000   # replace with the fingerprint
+printf '302a300506032b6570032100%s' "$PUB" | xxd -r -p > release-signing.der
+xxd -r -p SHA256SUMS.sig > SHA256SUMS.sig.bin
+openssl pkeyutl -verify -pubin -inkey release-signing.der -keyform DER \
+  -rawin -in SHA256SUMS -sigfile SHA256SUMS.sig.bin
+
+# 2. Check the archive you downloaded (BusyBox sha256sum has no --ignore-missing).
+grep "  $ASSET$" SHA256SUMS > SHA256SUMS.one
+sha256sum -c SHA256SUMS.one
+
+tar -xzf "$ASSET"
 install -Dm0755 repairflow ~/.local/bin/repairflow
 install -Dm0755 update-github.sh ~/.local/bin/update-github.sh
 install -Dm0755 repairflow-update ~/.local/bin/repairflow-update
 install -Dm0755 repairflow-autoupdate ~/.local/bin/repairflow-autoupdate
 repairflow version
 ```
+
+Step 1 is what authenticates the download: a bare `sha256sum -c` only proves that a file matches a
+list that arrived with it. The signed list covers the archives, and therefore `LICENSE` and the
+three update scripts whose hashes are not in `manifest.json`. With a RepairFlow binary already
+installed, `repairflow update verify --file SHA256SUMS --signature SHA256SUMS.sig` performs the same
+check against the key embedded in that build. That first download still trusts the release host
+over HTTPS until the fingerprint above is compared with the installed binary's key — check it once
+per key, not per download.
 
 `install -D` creates `~/.local/bin` when it is missing, and nothing here needs privilege: the binary
 belongs to you, so a signed update replaces it without `sudo`. On a shared or multi-user host,
@@ -60,17 +85,16 @@ property when installing that way; do not make the directory writable by the ser
 signed update of such an installation needs `sudo`/`doas` for the apply step; see
 [Deployment](DEPLOY.md).
 
-Checking the whole set keeps the command portable: Alpine's BusyBox `sha256sum` has no GNU
-`--ignore-missing`.
+Only the matching line is checked, so the second architecture's archive is not needed.
 
 Prereleases are never GitHub `latest`; fetch them by exact tag from the releases page (for example
 `…/releases/tag/v0.2.0-rc1`). Between prereleases there is **no migration promise**: a workspace may
 need to be recreated instead of migrated, and an older binary refuses a newer schema. Take a verified
 backup before opening a workspace with a newer binary.
 
-Use `repairflow_Linux_arm64.tar.gz` on ARM64. The archive also contains `LICENSE`, `manifest.json`
-and `manifest.sig`; keep the archive or those files with the installation to preserve the license and
-support offline verification. Keep the
+Use `repairflow_Linux_arm64.tar.gz` on ARM64. The archive also contains `LICENSE`, `manifest.json`,
+`manifest.sig` and the update helpers; keep the archive or those files with the installation to
+preserve the license and support offline verification. Keep the
 executable at a stable path: service units and updates refer to that location.
 
 ### From source

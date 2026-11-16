@@ -109,6 +109,10 @@ metadata, never storage paths. The workspace-owning OS account is the outer trus
 installs a root-owned binary that a regular user can execute but not replace. The workspace itself
 remains owned by the operator.
 
+`app.environment` is a free-form deployment label (`development` by default) reported by `status`
+and debug logs. It does not switch security behaviour: authentication, the loopback bind and remote
+access are separate `[web]` settings, and no configuration file enables a relaxed mode implicitly.
+
 The filesystem and SQLite cannot commit atomically together. Upload staging and `doctor`
 reconciliation expose missing or orphaned bytes. Backups combine a consistent `VACUUM INTO` database
 snapshot with hash-verified original files. Verification and restore share archive membership,

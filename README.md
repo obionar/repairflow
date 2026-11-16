@@ -65,6 +65,16 @@ RepairFlow is licensed under **AGPL-3.0-only**; see [LICENSE](LICENSE). This inc
 obligations for modified versions offered through a network interface. The compiled dependencies
 are BSD-3-Clause and MIT; `make license-check` verifies that inventory.
 
+### Verify a release
+
+Release artifacts are signed with the Ed25519 key
+`dfefd2ea87dd10bbc4bef626ba1422aed3d383e1789ef5546fa3d534cb855426`. Each release ships
+`SHA256SUMS` and `SHA256SUMS.sig`; authenticate the list before extracting anything, then check only
+the archive you downloaded. `repairflow update verify --file SHA256SUMS --signature SHA256SUMS.sig`
+uses the key embedded in an installed binary; the pre-install `openssl` recipe is in
+[the install guide](docs/INSTALL.md#from-a-release-archive). A bare checksum pass proves only that a
+file matches a list that arrived with it.
+
 ## Quick start
 
 ### Try the demo
