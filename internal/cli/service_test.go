@@ -45,7 +45,8 @@ func TestServiceInstallOpenRCThroughCLI(t *testing.T) {
 		"#!/sbin/openrc-run",
 		`command_args="serve --home ` + home + `"`,
 		"command_user=",
-		`pidfile="/run/${RC_SVCNAME}.pid"`,
+		`supervisor="supervise-daemon"`,
+		"respawn_max=5",
 		`output_log="` + filepath.Join(home, "logs", "service.log") + `"`,
 	} {
 		if !strings.Contains(string(body), want) {
