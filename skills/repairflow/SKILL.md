@@ -1,6 +1,7 @@
 ---
 name: repairflow
 description: Orient, build and change RepairFlow Go safely.
+license: AGPL-3.0-only
 ---
 
 # RepairFlow development
@@ -10,7 +11,14 @@ the application is one Go binary with an embedded web UI and SQLite.
 
 ## Orient
 
-Read, in order:
+Resolve the actual `SKILL.md` target (for example with `readlink -f` on the loaded skill path)
+before following repository-relative paths. For a symlinked skill, the checkout is three directories
+above that resolved file. If the skill was copied or that checkout is unavailable, locate or ask for
+the intended RepairFlow checkout; never infer it from the current directory. Set `REPO` to its
+absolute root, verify `go.mod` declares `module repairflow`, and inspect `git -C "$REPO" status -sb`
+and `git -C "$REPO" log -1`. Run the commands below from `cd "$REPO"`.
+
+Read, in order (paths are relative to that verified checkout):
 
 1. `AGENTS.md` — safety rules and definition of done.
 2. `docs/ARCHITECTURE.md` — approved invariants, schema and trade-offs.
@@ -42,14 +50,16 @@ ARM64 compilation is not ARM64 runtime proof; the tested target is Linux arm64.
 
 ```bash
 make build
-./scripts/run-demo.sh        # foreground, temporary workspace, Ctrl+C removes it
+REPAIRFLOW_BIN="$REPO/repairflow" ./scripts/run-demo.sh  # foreground; Ctrl+C removes workspace
 ```
 
 For manual CLI work create a disposable workspace explicitly:
 
 ```bash
-./repairflow init --home /tmp/rf-dev
-./repairflow --json customer list --home /tmp/rf-dev
+WS=$(mktemp -d "${TMPDIR:-/tmp}/rf-dev.XXXXXX")
+./repairflow version          # verify the build identity, not an installed PATH binary
+./repairflow init --home "$WS"
+./repairflow --json customer list --home "$WS"
 ```
 
 Never point a command, test, smoke script or example at a real workspace, `~/.repairflow`, an
@@ -70,25 +80,15 @@ Business logic never belongs in handlers or CLI parsing. Domain SQL and transact
 `internal/app`; `internal/db` owns the SQLite connection, schema and integrity checks. Add
 migrations; never rewrite an applied one.
 
-## Contracts that bite
+## Contract ownership
 
-- JSON success `{ok,command,contract,data}`; failure `{error:{code,message}}` on stderr with empty
-  stdout. Exit `0` success, `1` internal, `2` usage/validation/permission, `3` workspace/state
-  conflict, `4` not found.
-- Edits use the content-derived `revision` from `show`; omitting it is last-write-wins.
-- A repair may be unassigned (`customer_id: 0`, `unassigned: true`); create from the web with a
-  blank customer, then assign later. CLI: omit `--customer`, then `repair update ID --customer ID`
-  or `--no-customer`.
-- Repair stages: `new`, `in_progress`, `waiting_parts`, `lab_test`, `customer_test`, `repaired`,
-  `no_repair`; terminal stages require `--reopen`.
-- Entry kinds: `work`, `test`, `contact`, `handover`, `note`.
-- Money is integer cents; parts use integer milli-quantities; estimates are not payments.
-- Attachments preserve original bytes and SHA-256; detach is recoverable; purge requires
-  confirmation and the retention period. Never delete `files/.purge/` recovery links by hand.
-- The web listener is loopback-only by default. `web.allow_insecure_lan=true` is an explicit unsafe
-  testing exception and must never hold real records.
-- `make build`/`make cross` default to `0.2.0-dev`; a release must be explicitly stamped
-  (`0.2.0-rc1` for a candidate, `0.2.0` only after approval).
+Use `docs/CLI-CONTRACT.md` and `skills/repairflow-cli/SKILL.md` for flags, JSON, revisions,
+money input and record operations; `docs/ARCHITECTURE.md` for domain invariants; and
+`docs/SECURITY.md` for authentication, exposure and retention limits. Preserve these contracts
+and add regression coverage rather than copying their tables here.
+
+Build defaults come from `Makefile`; do not infer a release version from this skill. Packaging,
+installation and service/update mechanics belong to `skills/repairflow-deploy/SKILL.md`.
 
 ## Definition of done
 

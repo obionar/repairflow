@@ -1,22 +1,43 @@
 ---
 name: repairflow-deploy
 description: Release, install, back up and upgrade RepairFlow.
+license: AGPL-3.0-only
 ---
 
 # RepairFlow deploy and operate
 
-Use this when packaging a release or moving RepairFlow to a Linux host. Read the authoritative
-procedures in `docs/DEPLOY.md`, `docs/INSTALL.md` and `docs/USAGE.md` before executing.
+## Resolve scope and source
+
+Resolve the actual `SKILL.md` target (for example with `readlink -f` on the loaded skill path).
+The checkout is three directories above that resolved file; if copied or unavailable, locate or
+ask for the intended checkout. Set `REPO` to its absolute root, verify `go.mod` declares
+`module repairflow`, and read `AGENTS.md`. Resolve all `docs/`, `scripts/` and `skills/` references
+against that root, not the caller's current directory. Read `docs/INSTALL.md`, `docs/DEPLOY.md`
+and `docs/USAGE.md`; verify concrete steps against the installer/parser when docs disagree.
+
+For an installed app, select a trusted absolute `BIN` path and read `"$BIN" version` and
+`"$BIN" help`. Match docs/source to that version/commit: checkout instructions do not establish
+what an older installed binary supports. Inspect the intended workspace and actual service unit,
+including its executable, owner, name and home; do not infer them from defaults or prior runs.
+
+Examples below are recipes, not permission. Get explicit authorization for the exact target and
+operation before installation, account/data changes, service actions, updates, network downloads
+or publication. Use disposable workspaces for checks; never treat a live workspace as a fixture.
 
 ## Release artifact
 
+From `cd "$REPO"`, after release approval and the full development verification gate:
+
 ```bash
-scripts/release.sh --version X.Y.Z [--key /secure/release-signing.key] --out /fresh/output
+scripts/release.sh --version X.Y.Z --key /secure/release-signing.key --out /fresh/output
 ```
 
-The script refuses a dirty tree, a `-dev` version and an existing output directory. It builds
-`linux/amd64` and `linux/arm64`, writes a manifest naming the binary as `repairflow`, signs it, embeds
-the public key, verifies the manifest with a throwaway checker build, then writes exactly:
+Choose only an owner-approved version; read build defaults from `Makefile`, not this skill.
+The script refuses a dirty tree, a `-dev` version and an existing output directory. A publishable
+archive requires `--key` and its public key (`--pub` overrides the sibling `release-signing.pub`).
+It runs the license inventory check, builds `linux/amd64` and `linux/arm64`, signs a manifest naming
+the binary `repairflow`, embeds the public key and verifies the manifest with a checker build.
+It writes exactly these release assets:
 
 ```text
 repairflow_Linux_x86_64.tar.gz
@@ -24,116 +45,133 @@ repairflow_Linux_arm64.tar.gz
 SHA256SUMS
 ```
 
-Each archive contains only `repairflow`, `LICENSE`, `manifest.json`, `manifest.sig` and
-`update-github.sh`; `SHA256SUMS` covers the two archives. Do not upload loose
-binaries, README, source archives, demo scripts or manifests as release assets. The GitHub-generated
-source archives at the tag satisfy source availability. `make license-check` must pass before
-packaging.
+Each archive contains exactly `repairflow`, `LICENSE`, `manifest.json`, `manifest.sig`,
+`update-github.sh`, `repairflow-update` and `repairflow-autoupdate`. `SHA256SUMS` covers both
+archives. Do not upload loose binaries, docs, manifests or demo scripts as separate release assets.
+GitHub-generated source archives at the matching tag provide corresponding source for that build;
+preserve source availability for distributed or modified builds too. Never put signing keys,
+build output or release directories in git. Keep private keys out of chat/logs and backed up offline;
+operators installing a signed release do not need the publisher's private key.
 
-Never put a private signing key, build output or release directory into git. Keep signing keys
-offline and out of the repository, chat and logs.
+## Verify and install
 
-## Copy and verify
+Copy/download both archives and `SHA256SUMS` from the approved release into a fresh staging
+directory, then run there (BusyBox has no `--ignore-missing`):
 
 ```bash
-scp repairflow_Linux_x86_64.tar.gz repairflow_Linux_arm64.tar.gz SHA256SUMS technician@host:~/
-# on the target (both archives present: BusyBox sha256sum has no --ignore-missing)
 sha256sum -c SHA256SUMS
+# choose arm64 instead on an ARM64 target
 tar -xzf repairflow_Linux_x86_64.tar.gz
-sudo install -Dm0755 repairflow /usr/local/bin/repairflow
-sudo install -Dm0755 update-github.sh /usr/local/bin/update-github.sh
-/usr/local/bin/repairflow version
+BIN_DIR="$HOME/.local/bin"
+mkdir -p "$BIN_DIR"
+install -m 0755 repairflow update-github.sh repairflow-update repairflow-autoupdate "$BIN_DIR/"
+BIN="$BIN_DIR/repairflow"
+"$BIN" version
 ```
 
-On a `doas` host replace `sudo` with `doas`. The default `/usr/local/bin` is root-owned:
-a regular user can execute RepairFlow but cannot replace it. The workspace stays at
-`~/.repairflow` unless `--home`/`REPAIRFLOW_HOME` selects another path.
+Compare version AND commit with the approved artifact. Keep `LICENSE`, `manifest.json` and
+`manifest.sig` or the complete archive. For source installation, review `$REPO/install-repairflow`
+before invoking it: its default is `$HOME/.local/bin/repairflow`, with `REPAIRFLOW_PREFIX` selecting
+another prefix. It builds, then installs under the executable lock, but can also run `init` on an
+existing `REPAIRFLOW_HOME`/default workspace; it is not a data-free verification command.
 
-The binary must live at a stable absolute path before installing a service: the systemd unit pins
-that path and offline updates stage `<exe>.new` beside it.
+The default user-owned installation needs no privilege. A deliberately selected shared
+`/usr/local/bin` layout is root-owned and needs `sudo`/`doas` to install/replace it; never make it
+writable by the service user. Keep the binary at a stable absolute path before service installation.
+For upgrades, follow the backup/stop/apply/restart sequence below, not this fresh-install copy recipe.
 
-## First run
+## First run and service
+
+For a synthetic foreground check from the verified checkout, use
+`REPAIRFLOW_BIN="$BIN" "$REPO/scripts/run-demo.sh"`. This launcher is source-checkout only,
+not a release member; its known credentials must never be reused for real records.
+
+For an explicitly authorized new workspace, set `WS` to its absolute path and initialize it.
+Create the first admin through the environment interface without a password literal in history,
+arguments or logs. This example requires an interactive Bash terminal with tracing disabled;
+an agent should use an approved secret-injection mechanism, not collect a password in chat:
 
 ```bash
-# disposable synthetic check, from a source checkout
-./scripts/run-demo.sh
-
-# real workspace
-repairflow init --home /srv/repairflow
-REPAIRFLOW_NEW_PASSWORD='a-long-password' repairflow user add alice --role admin --home /srv/repairflow
-repairflow doctor --home /srv/repairflow
-repairflow serve --home /srv/repairflow
+"$BIN" init --home "$WS"
+(
+  set +x
+  read -r -s -p 'New admin password: ' REPAIRFLOW_NEW_PASSWORD || exit 1
+  printf '\n'
+  export REPAIRFLOW_NEW_PASSWORD
+  "$BIN" user add alice --role admin --home "$WS"
+)
+"$BIN" user list --home "$WS"       # confirm the intended account
+"$BIN" doctor --home "$WS"
 ```
 
-The UI is loopback-only by default. Reach it through an SSH tunnel or a TLS-terminating overlay;
-never expose a plain LAN listener holding real records. `web.allow_insecure_lan=true` is a
-testing-only exception.
+The UI is loopback-only by default. Keep authentication enabled for remote access and prefer an
+SSH tunnel or TLS-terminating proxy. Trusted-LAN HTTP exposes passwords and sessions in cleartext;
+`web.allow_insecure_lan=true` additionally permits unauthenticated LAN testing and must never hold
+real records. See `docs/SECURITY.md` and `docs/DEPLOY.md` for exposure limits.
 
-## Service
+Install a service only after checking its final binary path, workspace and chosen init system:
 
 ```bash
-repairflow service install --home /srv/repairflow     # systemd user unit
-repairflow service status
-# Alpine/OpenRC, with doas or sudo:
-doas repairflow service install --init openrc --home /srv/repairflow
-rc-service repairflow status
+"$BIN" service install --init systemd --home "$WS"  # may enable AND start the user unit
+"$BIN" service status --init systemd --home "$WS"
+# OpenRC alternative, only on that target:
+doas "$BIN" service install --init openrc --home "$WS"
+doas rc-service repairflow status
 ```
 
-`--name NAME` creates a second independent instance with its own workspace, port, binary path and
-unit. A unit whose marker belongs to another instance is refused, not overwritten. Removing a
-service must not delete a hand-written unit.
+Use `--no-enable` to write without starting; `--name NAME` selects a unit, not a new workspace,
+port or binary. Configure those separately and use the same name on all service/supervisor actions.
+Unprivileged OpenRC installation can stage a script instead of activating it; inspect the result.
+Unmarked or differently marked units are refused. Removal refuses an active service and must not
+delete a hand-written unit. Read back the generated unit and supervisor status, not just CLI success.
 
 ## Backup, restore and upgrade
 
 ```bash
-repairflow backup create --output /ABS/pre-upgrade.rfbak --home /srv/repairflow
-repairflow backup verify /ABS/pre-upgrade.rfbak
-repairflow restore /ABS/pre-upgrade.rfbak --home /srv/repairflow-new
-repairflow doctor --home /srv/repairflow-new
+"$BIN" backup create --output /ABS/pre-upgrade.rfbak --home "$WS"
+"$BIN" backup verify /ABS/pre-upgrade.rfbak
+"$BIN" restore /ABS/pre-upgrade.rfbak --home /ABS/new-empty-workspace
+"$BIN" doctor --home /ABS/new-empty-workspace
 ```
 
-A restore targets an empty/new workspace and verifies structure, hashes, schema and attachment
-references before publishing. Keep archives on separate storage; they contain customer data and
-password hashes and are not encrypted by the application.
+Backup output must be outside the source workspace. Restore targets a new/empty workspace only.
+Verification checks structure, hashes and the database snapshot; rehearse a restore, login and
+representative record/attachment readbacks before relying on it. Keep an access-controlled copy on
+separate storage: archives contain records and password hashes and are not encrypted. Local
+`locales/` overrides are excluded, so preserve them separately if needed.
 
-Signed GitHub update (exact tag, check first, then apply):
+Before an upgrade, verify that backup, inspect migration compatibility and stop the selected writer
+before the new binary opens its workspace. Do not assume prerelease migration compatibility or that
+`<exe>.prev` alone can undo a schema change. Use the exact published tag, including any `v` prefix;
+the following `TAG` is a placeholder to set from the approved release, not a latest-version claim:
 
 ```bash
-./update-github.sh --tag X.Y.Z --binary /usr/local/bin/repairflow
-./update-github.sh --tag X.Y.Z --binary /usr/local/bin/repairflow --apply
+"$BIN_DIR/update-github.sh" --tag "$TAG" --binary "$BIN"           # download + check only
+"$BIN_DIR/update-github.sh" --tag "$TAG" --binary "$BIN" --apply   # separate authorization
 ```
 
-The POSIX script downloads the exact architecture archive, rejects unsafe paths, verifies the signed
-manifest and artifact hash/size, and leaves service restart to the operator. It performs network and
-verification work as the operator and uses `doas`/`sudo` only for the local replacement when the
-binary directory is root-owned. Automatic escalation checks that the executable is a non-symlink
-regular file and that it and every parent are root-owned without group/world write permission
-(requires `stat`). Pass only a trusted installed binary as `--binary`.
+The helper downloads and verifies as the operator, may escalate only local replacement for a safe
+root-owned executable, and leaves restart separate. Pass only a trusted installed `BIN`. The
+archive also ships `repairflow-update` and `repairflow-autoupdate`; consult their matching source
+and `docs/DEPLOY.md` before using them. Do not configure unattended activation without approval.
 
-Signed offline update:
+For offline signed updates, check first with
+`"$BIN" update check --manifest manifest.json --signature manifest.sig`, then use
+`"$BIN" update apply --file /ABS/staged/repairflow --manifest manifest.json --signature manifest.sig --confirm`.
+Only root-owned replacement needs `sudo`/`doas`. Never disable signature/hash/size/path/version
+checks. Unsigned builds cannot use signed apply; any manual replacement needs its own approved
+backup, stopped-writer and rollback procedure. Keep `<exe>.lock`; verified apply is Linux-only.
 
-```bash
-/usr/local/bin/repairflow update check --manifest manifest.json --signature manifest.sig
-sudo /usr/local/bin/repairflow update apply --file repairflow --manifest manifest.json \
-  --signature manifest.sig --confirm
-/usr/local/bin/repairflow service install          # re-pin the unit if the path changed
-/usr/local/bin/repairflow doctor --home /srv/repairflow
-```
+Restart the selected supervisor, re-pin its unit if the binary path changed, open a domain command
+(e.g. `"$BIN" customer list --per-page 1 --home "$WS"`) to apply pending migrations, then read back
+version/commit, `doctor`, record counts, the unit's executable/home and an authenticated web page.
+Report any unverified step. A successful binary swap alone does not prove the running service updated.
 
-`update check` and `doctor` run as the operator; the root-owned replacement needs `sudo`/`doas`.
-The updater serializes on `<exe>.lock`; do not delete that file during an update. Unsigned builds
-cannot use `update apply`; copy the binary and re-run `service install` instead. Never disable
-signature, hash, size or path checks to make an upgrade pass. Verified apply is Linux-only; other
-platforms must refuse.
+## Limits
 
-## Safety and limits
-
-- Never deploy against another operator's workspace, installed service or customer data.
-- Back up before a destructive operation or upgrade; test the archive first.
-- One workspace per instance; no sync, shared server mode, telemetry or outbound calls.
-- Plain HTTP inside the app, no TLS termination, no multi-user isolation and no encryption at rest.
-  Tailscale/SSH or another TLS proxy is a host-level concern.
-- The workspace-owning OS account is the trust boundary; web roles are cooperative, not a sandbox.
-- Do not push, tag, publish or deploy without explicit owner authorization.
-- RepairFlow is AGPL-3.0-only; preserve `LICENSE` in every distributed bundle. Do not relicense the
-  project without the owner.
+The application itself has no outbound calls or built-in scheduler; the optional external update
+scripts perform network access when invoked or scheduled. One owner account/workspace is the trust
+boundary, not web-role isolation. There is no built-in TLS termination or encryption at rest.
+Push, tag, release publication and deployment are separately authorized actions.
+RepairFlow is AGPL-3.0-only: preserve `LICENSE` and corresponding-source availability; do not
+relicense the project.
