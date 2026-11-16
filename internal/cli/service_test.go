@@ -20,9 +20,26 @@ func initWorkspace(t *testing.T, dir string) string {
 	return dir
 }
 
-// TestServiceInstallOpenRCThroughCLI exercises the flag plumbing: --init openrc
-// writes the OpenRC script wherever REPAIRFLOW_INIT_DIR points, and status/remove
-// follow the same target.
+// Staging is not evidence about an existing service's running state.
+func TestStagedOpenRCTextDoesNotInventStoppedService(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can overwrite read-only test units")
+	}
+	dir := t.TempDir()
+	target := filepath.Join(dir, "repairflow")
+	if err := os.WriteFile(target, []byte("#!/bin/sh\n# managed-by=repairflow\n"), 0o400); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(target, 0o600) })
+	home := initWorkspace(t, t.TempDir())
+	res := run(t, map[string]string{"REPAIRFLOW_INIT_DIR": dir}, "service", "install",
+		"--init", "openrc", "--no-enable", "--home", home)
+	if res.code != 0 || !strings.Contains(res.stdout, "present=true") ||
+		!strings.Contains(res.stdout, "staged:") || strings.Contains(res.stdout, "not running") {
+		t.Fatalf("staging must not assert that the existing service stopped: %d %s %s", res.code, res.stdout, res.stderr)
+	}
+}
+
 func TestServiceInstallOpenRCThroughCLI(t *testing.T) {
 	home := initWorkspace(t, t.TempDir())
 	initDir := filepath.Join(t.TempDir(), "init.d")

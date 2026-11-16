@@ -203,7 +203,7 @@ func renderData(data any) (string, bool) {
 	case *serviceReport:
 		out, _ := renderData(v.Result)
 		if v.StagedPath != "" {
-			out += "note: unit is staged and not running; install it with the command above\n"
+			out += "note: replacement staged only; existing service unchanged; install it with the command above\n"
 		}
 		if v.WebURL != "" {
 			out += "web: " + v.WebURL + "\n"

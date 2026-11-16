@@ -379,8 +379,35 @@ func TestOpenRCUnprivilegedStagesAndPrintsCommand(t *testing.T) {
 	}
 }
 
-// TestOpenRCStagedScriptIsTheRenderedScript proves the unprivileged staging path
-// writes exactly what a privileged install writes for the same options.
+// A staged replacement must not hide a unit already on disk.
+func TestOpenRCStagingPreservesExistingUnitPresence(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can overwrite a read-only test unit")
+	}
+	dir := t.TempDir()
+	target := filepath.Join(dir, "repairflow")
+	body := "#!/bin/sh\n# managed-by=repairflow\n# existing unit\n"
+	if err := os.WriteFile(target, []byte(body), 0o400); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(target, 0o600) })
+	res, err := service.Install(service.Options{
+		BinaryPath: "/home/u/bin/repairflow", Home: t.TempDir(),
+		Init: service.InitOpenRC, InitDir: dir, User: "u:u",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Present || res.StagedPath == "" {
+		t.Fatalf("existing unit and staged replacement must be reported independently: %+v", res)
+	}
+	got, err := os.ReadFile(target)
+	if err != nil || string(got) != body {
+		t.Fatalf("existing unit changed: %q, %v", got, err)
+	}
+}
+
+// A staged script must be the exact rendered candidate.
 func TestOpenRCStagedScriptIsTheRenderedScript(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("running as root: the init directory is writable")

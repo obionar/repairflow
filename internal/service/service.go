@@ -302,7 +302,11 @@ func stageOpenRC(o Options, name, body string, res *Result) (*Result, error) {
 			priv+" rc-update add "+name+" default",
 			priv+" rc-service "+name+" start")
 	}
-	res.Present = false
+	_, statErr := os.Stat(res.UnitPath)
+	if statErr != nil && !os.IsNotExist(statErr) {
+		return nil, errs.Wrap(errs.CodeInternal, statErr, "cannot inspect existing OpenRC service script")
+	}
+	res.Present = statErr == nil
 	res.StagedPath = staged
 	res.Command = strings.Join(cmds, " && ")
 	res.Warning = joinWarning(res.Warning,
