@@ -501,6 +501,9 @@ func renderUnit(name, binaryPath, home string) string {
 // renderOpenRC builds the Alpine/OpenRC service script. command_user is the
 // workspace owner (the script starts as root and drops to that account); the log
 // stays inside the workspace so it follows the same ownership and retention.
+// supervise-daemon restarts a crashed server (bounded), and start_pre refuses to
+// start at all when `config check` fails as the workspace owner, so a broken
+// config is one visible error instead of a restart loop.
 func renderOpenRC(name, binaryPath, home, user, logPath string) string {
 	var b strings.Builder
 	b.WriteString("#!/sbin/openrc-run\n")
@@ -513,8 +516,8 @@ func renderOpenRC(name, binaryPath, home, user, logPath string) string {
 	if user != "" {
 		b.WriteString("command_user=" + openrcValue(user) + "\n")
 	}
-	b.WriteString("command_background=\"yes\"\n")
-	b.WriteString("pidfile=\"/run/${RC_SVCNAME}.pid\"\n")
+	b.WriteString("supervisor=\"supervise-daemon\"\n")
+	b.WriteString("respawn_delay=10\nrespawn_max=5\n")
 	b.WriteString("output_log=" + openrcValue(logPath) + "\n")
 	b.WriteString("error_log=" + openrcValue(logPath) + "\n\n")
 	b.WriteString("depend() {\n\tneed net\n\tafter firewall\n}\n\n")
@@ -522,8 +525,25 @@ func renderOpenRC(name, binaryPath, home, user, logPath string) string {
 	if user != "" {
 		b.WriteString(" --owner " + openrcValue(user))
 	}
-	b.WriteString(" --mode 0600 \"${output_log}\"\n}\n")
+	b.WriteString(" --mode 0600 \"${output_log}\"\n")
+	// The inner command is already shell-quoted for the sh -c it is handed to,
+	// so the outer quoting nests (paths with quotes are rare, correctness is not).
+	check := shellQuote(binaryPath) + " config check --home " + shellQuote(home)
+	if user != "" {
+		// The check must run as the owner, never as root against a user-owned
+		// workspace; `config check` only reads, it creates nothing.
+		check = "su -s /bin/sh -c " + shellQuote(check) + " " + shellQuote(ownerName(user))
+	}
+	b.WriteString("\t" + check + " || {\n")
+	b.WriteString("\t\teerror \"configuration check failed; the service was not started (see above)\"\n")
+	b.WriteString("\t\treturn 1\n\t}\n}\n")
 	return b.String()
+}
+
+// ownerName drops the group from a command_user value ("user:group").
+func ownerName(user string) string {
+	name, _, _ := strings.Cut(user, ":")
+	return name
 }
 
 // managedService reports which service instance wrote a unit body. The bare

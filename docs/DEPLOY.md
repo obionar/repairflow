@@ -159,6 +159,12 @@ The installer writes `/etc/init.d/repairflow`, runs the process as the workspace
 invoking user's default. Without sufficient privileges, the installer stages the script under
 `<workspace>/cache/service/` and prints the privileged command needed to finish installation.
 
+The script is supervised by `supervise-daemon`, which restarts a crashed server after 10 seconds
+and gives up after 5 attempts. Before starting, it runs `repairflow config check` as the workspace
+owner, so a broken configuration is refused with one logged error instead of a restart loop. If
+`rc-service repairflow status` reports `crashed`, read the log and run
+`doas -u <owner> repairflow config check --home <workspace>`.
+
 Use `--init systemd`, `--init openrc` or `--init none` to override automatic detection. `none`
 writes no unit and prints the command for another supervisor.
 

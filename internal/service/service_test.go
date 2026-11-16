@@ -227,7 +227,8 @@ func TestInstallRefusesUnmanagedUnit(t *testing.T) {
 }
 
 // TestOpenRCInstallWritesScript covers the generated Alpine service script: the
-// command, its arguments, the account it drops to, the pidfile and the logs.
+// command, its arguments, the account it drops to, the supervised logs and the
+// pre-start configuration check.
 func TestOpenRCInstallWritesScript(t *testing.T) {
 	initDir := filepath.Join(t.TempDir(), "init.d")
 	home := filepath.Join(t.TempDir(), "ws")
@@ -260,15 +261,24 @@ func TestOpenRCInstallWritesScript(t *testing.T) {
 		`command="/home/u/bin/repairflow"`,
 		`command_args="serve --home ` + home + `"`,
 		`command_user="u:u"`,
-		`command_background="yes"`,
-		`pidfile="/run/${RC_SVCNAME}.pid"`,
+		`supervisor="supervise-daemon"`,
+		"respawn_delay=10",
+		"respawn_max=5",
 		`output_log="` + logPath + `"`,
 		`error_log="` + logPath + `"`,
 		`checkpath --file --owner "u:u" --mode 0600 "${output_log}"`,
 		"need net",
+		`su -s /bin/sh -c '/home/u/bin/repairflow config check --home ` + home + `' u`,
 	} {
 		if !strings.Contains(script, want) {
 			t.Errorf("script missing %q:\n%s", want, script)
+		}
+	}
+	// supervise-daemon owns the process: a forking background command with a
+	// pidfile would be supervised twice and could not respawn.
+	for _, unwanted := range []string{"command_background", "pidfile"} {
+		if strings.Contains(script, unwanted) {
+			t.Errorf("script must not use %s:\n%s", unwanted, script)
 		}
 	}
 	info, err := os.Stat(res.UnitPath)
@@ -366,6 +376,80 @@ func TestOpenRCUnprivilegedStagesAndPrintsCommand(t *testing.T) {
 	}
 	if !strings.Contains(res.Warning, "no privileges") {
 		t.Errorf("warning must explain the missing privileges: %q", res.Warning)
+	}
+}
+
+// TestOpenRCStagedScriptIsTheRenderedScript proves the unprivileged staging path
+// writes exactly what a privileged install writes for the same options.
+func TestOpenRCStagedScriptIsTheRenderedScript(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: the init directory is writable")
+	}
+	home := filepath.Join(t.TempDir(), "ws")
+	opts := service.Options{
+		BinaryPath: "/home/u/bin/repairflow",
+		Home:       home,
+		Init:       service.InitOpenRC,
+		User:       "u:u",
+	}
+	installed := opts
+	installed.InitDir = filepath.Join(t.TempDir(), "init.d")
+	res, err := service.Install(installed)
+	if err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	want, err := os.ReadFile(res.UnitPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	locked := filepath.Join(t.TempDir(), "init.d")
+	if err := os.MkdirAll(locked, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+	stagedOpts := opts
+	stagedOpts.InitDir = locked
+	staged, err := service.Install(stagedOpts)
+	if err != nil {
+		t.Fatalf("staged install: %v", err)
+	}
+	got, err := os.ReadFile(staged.StagedPath)
+	if err != nil {
+		t.Fatalf("staged script unreadable: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("staged script differs from the installed one:\n--- staged ---\n%s\n--- installed ---\n%s", got, want)
+	}
+}
+
+// TestOpenRCConfigCheckQuotesPaths keeps the pre-start check parseable when the
+// binary or workspace path contains a space or a quote.
+func TestOpenRCConfigCheckQuotesPaths(t *testing.T) {
+	initDir := filepath.Join(t.TempDir(), "init.d")
+	binaryPath := "/home/u/bin dir/'repairflow'"
+	home := filepath.Join(t.TempDir(), "my data 'ws'")
+	res, err := service.Install(service.Options{
+		BinaryPath: binaryPath,
+		Home:       home,
+		Init:       service.InitOpenRC,
+		InitDir:    initDir,
+		User:       "u:u",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(res.UnitPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+	want := "su -s /bin/sh -c " + quote(quote(binaryPath)+" config check --home "+quote(home)) + " u"
+	if !strings.Contains(string(body), want) {
+		t.Errorf("config check is not quoted as %q:\n%s", want, body)
+	}
+	if out, err := exec.Command("sh", "-n", res.UnitPath).CombinedOutput(); err != nil {
+		t.Fatalf("generated script does not parse: %v\n%s", err, out)
 	}
 }
 
