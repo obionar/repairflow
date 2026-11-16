@@ -42,23 +42,26 @@ install --home /absolute/workspace` so the unit uses the new binary path.
 
 Download the archive for this machine, the signed checksum list and its signature, then
 authenticate the list before extracting anything. `TAG` is the exact release tag; the release
-public-key fingerprint is published with the release.
+public key is published in the [README](../README.md#verify-a-release). First-install signature
+verification below needs `openssl` and `xxd`; they are verification tools, not application runtimes.
 
 ```bash
+set -eu                         # stop before extraction if any verification step fails
 TAG=v0.2.0-rc5
 ASSET=repairflow_Linux_arm64.tar.gz          # repairflow_Linux_x86_64.tar.gz on amd64
 BASE=https://github.com/obionar/repairflow/releases/download/$TAG
 wget -q "$BASE/$ASSET" "$BASE/SHA256SUMS" "$BASE/SHA256SUMS.sig"
 
-# 1. Authenticate SHA256SUMS with the published 64-hex-character release key.
-PUB=0000000000000000000000000000000000000000000000000000000000000000   # replace with the fingerprint
+# 1. Authenticate SHA256SUMS with the published Ed25519 public key (not a key hash).
+PUB=dfefd2ea87dd10bbc4bef626ba1422aed3d383e1789ef5546fa3d534cb855426
 printf '302a300506032b6570032100%s' "$PUB" | xxd -r -p > release-signing.der
 xxd -r -p SHA256SUMS.sig > SHA256SUMS.sig.bin
 openssl pkeyutl -verify -pubin -inkey release-signing.der -keyform DER \
   -rawin -in SHA256SUMS -sigfile SHA256SUMS.sig.bin
 
 # 2. Check the archive you downloaded (BusyBox sha256sum has no --ignore-missing).
-grep "  $ASSET$" SHA256SUMS > SHA256SUMS.one
+awk -v asset="$ASSET" '$2 == asset { print }' SHA256SUMS > SHA256SUMS.one
+test "$(wc -l < SHA256SUMS.one)" -eq 1
 sha256sum -c SHA256SUMS.one
 
 tar -xzf "$ASSET"
@@ -71,11 +74,12 @@ repairflow version
 
 Step 1 is what authenticates the download: a bare `sha256sum -c` only proves that a file matches a
 list that arrived with it. The signed list covers the archives, and therefore `LICENSE` and the
-three update scripts whose hashes are not in `manifest.json`. With a RepairFlow binary already
-installed, `repairflow update verify --file SHA256SUMS --signature SHA256SUMS.sig` performs the same
-check against the key embedded in that build. That first download still trusts the release host
-over HTTPS until the fingerprint above is compared with the installed binary's key — check it once
-per key, not per download.
+three update scripts whose hashes are not in `manifest.json`. An already trusted **RC5 or newer**
+binary can instead run `repairflow update verify --file SHA256SUMS --signature SHA256SUMS.sig`
+against its embedded key; RC4 does not have that subcommand. A just-downloaded binary is not an
+independent verifier of its own download. First installation trusts the published public key;
+compare it through a separately trusted channel if protection against release-host compromise is
+required. Recheck trust when the signing key changes.
 
 `install -D` creates `~/.local/bin` when it is missing, and nothing here needs privilege: the binary
 belongs to you, so a signed update replaces it without `sudo`. On a shared or multi-user host,
@@ -152,9 +156,7 @@ to every command or set `REPAIRFLOW_HOME`.
 
 ```bash
 repairflow init --language en
-export REPAIRFLOW_NEW_PASSWORD='use-a-long-unique-password'
-repairflow user add admin --role admin
-unset REPAIRFLOW_NEW_PASSWORD
+repairflow user add admin --role admin   # interactive, hidden password prompt
 repairflow doctor
 repairflow serve
 ```
