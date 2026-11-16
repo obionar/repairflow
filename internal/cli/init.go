@@ -19,6 +19,14 @@ type initDemoResult struct {
 	Seed *seed.Result         `json:"seed,omitempty"`
 }
 
+// initReport adds the additive ignored list without changing the established
+// workspace init JSON fields.
+type initReport struct {
+	*workspace.InitResult
+	Ignored          []string `json:"ignored,omitempty"`
+	existingLanguage string
+}
+
 // workspaceInitWith initializes the workspace and applies the chosen web port
 // and interface language to a config this call created. An existing config is
 // never rewritten.
@@ -59,7 +67,22 @@ func runInit(ctx context.Context, stdin io.Reader, stdout io.Writer, opts option
 		return nil, errs.New(errs.CodeUsage, "init takes no positional arguments, got %q", strings.Join(p.positional, " "))
 	}
 	if p.flag("interactive") {
-		return runInitWizard(ctx, stdin, stdout, opts, getenv)
+		data, err := runInitWizard(ctx, stdin, stdout, opts, getenv)
+		if err != nil {
+			return nil, err
+		}
+		// The wizard only opens the database when it creates an account or
+		// seeds demo data; the plain path must initialize it too.
+		if result, ok := data.(map[string]any); ok {
+			if res, ok := result["init"].(*workspace.InitResult); ok {
+				_, closeDB, err := openService(ctx, res.Home, opts.logger)
+				if err != nil {
+					return nil, err
+				}
+				closeDB()
+			}
+		}
+		return data, nil
 	}
 	if !p.flag("demo") && p.get("demo-user") != "" {
 		return nil, errs.New(errs.CodeUsage, "--demo-user requires --demo")
@@ -92,14 +115,28 @@ func runInit(ctx context.Context, stdin io.Reader, stdout io.Writer, opts option
 	if err != nil {
 		return nil, err
 	}
-	if !p.flag("demo") {
-		return res, nil
+	report := &initReport{InitResult: res}
+	if res.AlreadyInitialized && language != "" {
+		cfg, err := config.Load(res.ConfigPath)
+		if err != nil {
+			return nil, err
+		}
+		// An existing config is never rewritten, so a supplied --language is
+		// not applied even when it matches the current value.
+		report.Ignored = []string{"language"}
+		report.existingLanguage = cfg.UI.Language
 	}
+	// init is the explicit database-initializing command: open the shared
+	// service so migrations run now and doctor is healthy immediately. No
+	// records, users or demo data are created here.
 	svc, closeDB, err := openService(ctx, home, opts.logger)
 	if err != nil {
 		return nil, err
 	}
 	defer closeDB()
+	if !p.flag("demo") {
+		return report, nil
+	}
 	seeded, err := seed.DemoWithOptions(ctx, svc, seedOpts)
 	if err != nil {
 		return nil, err

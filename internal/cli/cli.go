@@ -50,7 +50,13 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	var data any
 	switch command {
 	case "help":
-		return writeText(stdout, usageText)
+		if len(rest) == 0 {
+			return writeText(stdout, usageText)
+		}
+		if text, focused := focusedUsage(rest); focused {
+			return writeText(stdout, text)
+		}
+		err = errs.New(errs.CodeUsage, "unknown help topic %q (run \"repairflow help\")", strings.Join(rest, " "))
 	case "version":
 		if len(rest) > 0 {
 			err = errs.New(errs.CodeUsage, "version takes no arguments, got %q", strings.Join(rest, " "))

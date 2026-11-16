@@ -63,13 +63,24 @@ seed demo [--demo-user NAME]
 demo reset --confirm
 ```
 
-`init` creates owner-only directories and writes configuration only when absent. Domain commands
-create and migrate the database explicitly. Newer schemas are refused.
+`init` creates owner-only directories, writes configuration only when absent, and initializes or
+migrates the SQLite database to the current schema. It creates no records or accounts, so a fresh
+`init` followed by `doctor` is healthy. Re-running `init` preserves existing configuration, records
+and accounts; newer schemas are still refused. `--language` is applied only when `init` writes a new
+config: on an existing workspace it is ignored, JSON reports `ignored:["language"]` when supplied,
+and human output says the existing language was kept.
 
-`doctor` checks the workspace, schema, database integrity, records, demo marker and the stored
-attachment bytes (size and SHA-256, so a large gallery takes longer). `cleanup` removes stale upload
-staging and cache only; it never removes business records, attachments, configuration, backups or
-recovery data.
+`doctor` remains read-only: it reports a missing or outdated schema instead of migrating it, and
+checks workspace, database integrity, records, demo marker and the stored attachment bytes (size and
+SHA-256, so a large gallery takes longer). `cleanup` removes stale upload staging and cache only; it
+never removes business records, attachments, configuration, backups or recovery data.
+
+`serve` binds `web.host:web.port` before reporting readiness. Startup logs the actual `/login` URL,
+version, commit, schema, workspace and authentication state on stderr; a failed bind prints no
+readiness line and keeps the `port_in_use` exit status. With authentication enabled and no active
+account, the process logs the scoped `repairflow user add admin --role admin --home PATH` remedy; the
+public login page never reveals whether accounts exist. An orderly stop logs a timestamped stop line,
+and JSON stdout contains only the usual `serve` envelope at command completion.
 
 Demo seeding refuses existing business data. Reset requires unchanged synthetic content and keeps
 users and sessions. `--demo-user` creates an optional admin using `REPAIRFLOW_NEW_PASSWORD`; it never

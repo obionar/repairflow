@@ -6,6 +6,7 @@ import (
 	"repairflow/internal/app"
 	"repairflow/internal/backup"
 	"repairflow/internal/buildinfo"
+	"repairflow/internal/db"
 	"repairflow/internal/seed"
 	"repairflow/internal/service"
 	"repairflow/internal/update"
@@ -21,6 +22,20 @@ func renderData(data any) (string, bool) {
 			return fmt.Sprintf("workspace already initialized: %s\n", v.Home), true
 		}
 		return fmt.Sprintf("initialized workspace: %s\nconfig: %s\n", v.Home, v.ConfigPath), true
+	case *initReport:
+		out := ""
+		if v.AlreadyInitialized {
+			out = fmt.Sprintf("workspace already initialized: %s\n", v.Home)
+		} else {
+			out = fmt.Sprintf("initialized workspace: %s\nconfig: %s\n", v.Home, v.ConfigPath)
+		}
+		out += fmt.Sprintf("database: schema %d ready\n", db.LatestVersion())
+		if len(v.Ignored) > 0 {
+			out += fmt.Sprintf("note: existing config kept; --language not applied (current: %s)\n", v.existingLanguage)
+		}
+		return out, true
+	case serveReport:
+		return fmt.Sprintf("stopped serving %s:%d (workspace %s)\n", v.Host, v.Port, v.Home), true
 	case *workspace.Status:
 		return fmt.Sprintf("home: %s\ninitialized: %t\nconfig_version: %d\napp.environment: %s\nweb: %s:%d\n",
 			v.Home, v.Initialized, v.Config.ConfigVersion, v.Config.App.Environment, v.Config.Web.Host, v.Config.Web.Port), true

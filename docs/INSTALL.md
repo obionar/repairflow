@@ -162,9 +162,17 @@ repairflow serve
 Open <http://127.0.0.1:8091/login> and sign in with the account you created. There is no web
 sign-up page.
 
-`init` supports `en`, `el`, `ru`, `tr`, `es`, `fr` and `de`. Use `repairflow init --interactive`
-to answer prompts for the workspace, port, language and optional demo data. Initialization never
-overwrites an existing configuration or existing records.
+`init` supports `en`, `el`, `ru`, `tr`, `es`, `fr` and `de`. It creates the workspace configuration
+and initializes or migrates the SQLite database, but creates no records or accounts, so `doctor` is
+healthy immediately afterwards. Use `repairflow init --interactive` to answer prompts for the
+workspace, port, language and optional demo data. Initialization never overwrites an existing
+configuration or existing records, and `--language` on an existing workspace reports that the
+existing language was kept.
+
+`repairflow serve` logs its actual `/login` URL, version, schema and workspace on stderr once the
+listener is bound, then stops cleanly on Ctrl+C. If authentication is enabled and no active account
+exists, it prints the `repairflow user add admin --role admin` remedy; the web login page has no
+sign-up or account-listing page.
 
 Passwords must be 6–256 characters. Use a long, unique password whenever the interface may be
 reachable from another machine.

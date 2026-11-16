@@ -96,10 +96,11 @@ or configuration created by a newer schema version is refused rather than downgr
 | v9 `repair_customer_optional` | Nullable repair customer for unassigned intake |
 | v10 `label_printer` | One workspace-wide label-printer choice; empty driver means printing is off |
 
-`schema_migrations` tracks applied versions. `doctor` runs database integrity and foreign-key checks
-and hash-verifies every retained attachment against its stored size and SHA-256, reporting missing
-bytes or changed content. Revisions are derived from current content, not stored as independent
-version numbers.
+`schema_migrations` tracks applied versions. `init` explicitly opens and migrates the database (as
+do domain commands), while read-only `doctor` only reports a missing or outdated schema. `doctor`
+runs database integrity and foreign-key checks and hash-verifies every retained attachment against
+its stored size and SHA-256, reporting missing bytes or changed content. Revisions are derived from
+current content, not stored as independent version numbers.
 
 ## Workspace and failure handling
 
@@ -108,6 +109,10 @@ and `run/`. Configuration is strict and is not silently rewritten. User-supplied
 metadata, never storage paths. The workspace-owning OS account is the outer trust boundary. The default executable is `~/.local/bin/repairflow`, owned by the operator; `REPAIRFLOW_PREFIX=/usr/local`
 installs a root-owned binary that a regular user can execute but not replace. The workspace itself
 remains owned by the operator.
+
+`serve` binds the configured listener first and only then logs readiness, so an address conflict can
+never be reported as a running server. The same bound listener is handed to the HTTP serving loop;
+shutdown stays with the process signal context.
 
 `app.environment` is a free-form deployment label (`development` by default) reported by `status`
 and debug logs. It does not switch security behaviour: authentication, the loopback bind and remote

@@ -6,8 +6,10 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"syscall"
 
+	"repairflow/internal/buildinfo"
 	"repairflow/internal/config"
 	"repairflow/internal/db"
 	"repairflow/internal/errs"
@@ -83,14 +85,53 @@ func runServe(ctx context.Context, opts options, args []string, getenv Env) (any
 		"host", status.Config.Web.Host, "port", status.Config.Web.Port,
 		"environment", status.Config.App.Environment, "config_version", status.Config.ConfigVersion,
 		"schema_version", db.LatestVersion())
-	if err := web.ListenAndServe(ctx, status.Config.Web.Host, status.Config.Web.Port, srv.Handler()); err != nil {
+
+	addr := net.JoinHostPort(status.Config.Web.Host, strconv.Itoa(status.Config.Web.Port))
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
 		var opErr *net.OpError
 		if errors.As(err, &opErr) && errors.Is(err, syscall.EADDRINUSE) {
 			return nil, errs.Wrap(errs.CodePortInUse, err,
 				"web port %d on %s is already in use; stop the other process or change web.port",
 				status.Config.Web.Port, status.Config.Web.Host)
 		}
+		return nil, errs.Wrap(errs.CodeInternal, err, "web server failed on %s", addr)
+	}
+	defer func() { _ = ln.Close() }()
+
+	// Inspect accounts only for the operator's benefit: the public login page
+	// must not reveal whether accounts exist. A disabled-only account list still
+	// cannot authenticate, so warn on zero active accounts.
+	if status.Config.Web.AuthRequired {
+		users, err := svc.ListUsers(ctx)
+		if err != nil {
+			opts.logger.Warn("cannot inspect accounts", "operation", "serve", "error_code", errs.CodeOf(err))
+		} else {
+			active := 0
+			for _, u := range users {
+				if u.Active {
+					active++
+				}
+			}
+			if active == 0 {
+				opts.logger.Warn("no active accounts: login will fail; create one with: repairflow user add admin --role admin --home "+home,
+					"operation", "serve", "users", len(users))
+			}
+		}
+	}
+
+	url := "http://" + ln.Addr().String() + "/login"
+	auth := "required"
+	if !status.Config.Web.AuthRequired {
+		auth = "disabled"
+	}
+	opts.logger.Info("web interface ready; press Ctrl+C to stop", "operation", "serve",
+		"url", url, "version", buildinfo.Get().Version, "commit", buildinfo.Get().Commit,
+		"schema_version", db.LatestVersion(), "home", home, "auth", auth)
+
+	if err := web.Serve(ctx, ln, srv.Handler()); err != nil {
 		return nil, err
 	}
+	opts.logger.Info("web interface stopped", "operation", "serve", "url", url)
 	return serveReport{Home: home, Host: status.Config.Web.Host, Port: status.Config.Web.Port}, nil
 }

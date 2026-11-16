@@ -214,13 +214,14 @@ func humanBytes(size int64) string {
 	return fmt.Sprintf("%.1f %cB", float64(size)/float64(div), "KMGTPE"[exp])
 }
 
-// ListenAndServe runs the web interface until ctx is cancelled, then shuts
-// down gracefully.
-func ListenAndServe(ctx context.Context, host string, port int, handler http.Handler) error {
-	addr := net.JoinHostPort(host, strconv.Itoa(port))
-	srv := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
+// Serve runs the web interface on an already-bound listener until ctx is
+// cancelled, then shuts down gracefully. The caller owns listener creation, so
+// readiness can be reported only after a successful bind.
+func Serve(ctx context.Context, ln net.Listener, handler http.Handler) error {
+	addr := ln.Addr().String()
+	srv := &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	errCh := make(chan error, 1)
-	go func() { errCh <- srv.ListenAndServe() }()
+	go func() { errCh <- srv.Serve(ln) }()
 	select {
 	case err := <-errCh:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -235,6 +236,17 @@ func ListenAndServe(ctx context.Context, host string, port int, handler http.Han
 		}
 		return nil
 	}
+}
+
+// ListenAndServe binds host:port and serves until ctx is cancelled.
+func ListenAndServe(ctx context.Context, host string, port int, handler http.Handler) error {
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return errs.Wrap(errs.CodeInternal, err, "web server failed on %s", addr)
+	}
+	defer func() { _ = ln.Close() }()
+	return Serve(ctx, ln, handler)
 }
 
 // Assets returns the embedded static tree (used by tests and future needs).
