@@ -27,6 +27,7 @@ const (
 	CodeConfigInvalid   Code = "config_invalid"             // config file malformed or invalid (exit 3)
 	CodeConfigVersion   Code = "config_version_unsupported" // config from a newer/unknown format (exit 3)
 	CodeConflict        Code = "conflict"                   // concurrent/stale state conflict (exit 3)
+	CodePortInUse       Code = "port_in_use"                // listen address already taken (exit 3)
 	CodeNotFound        Code = "not_found"                  // referenced record does not exist (exit 4)
 	CodeInternal        Code = "internal_error"             // unexpected failure (exit 1)
 )
@@ -80,7 +81,7 @@ func ExitCode(err error) int {
 	switch CodeOf(err) {
 	case CodeUsage, CodeValidation, CodeUnsafePath, CodePermission:
 		return 2
-	case CodeWorkspaceExists, CodeNotInitialized, CodeConfigInvalid, CodeConfigVersion, CodeConflict:
+	case CodeWorkspaceExists, CodeNotInitialized, CodeConfigInvalid, CodeConfigVersion, CodeConflict, CodePortInUse:
 		return 3
 	case CodeNotFound:
 		return 4

@@ -87,7 +87,10 @@ func TestServiceInstallSystemdJSONUnchanged(t *testing.T) {
 	}
 	for _, key := range got {
 		switch key {
-		case "unit_path", "present", "active", "enabled", "warning":
+		// web_url, log_location and status_command are documented additive
+		// `service install` fields; this list still refuses anything new.
+		case "unit_path", "present", "active", "enabled", "warning",
+			"web_url", "log_location", "status_command":
 		default:
 			t.Errorf("unexpected service field %q in %v", key, data)
 		}

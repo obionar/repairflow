@@ -2,8 +2,11 @@ package cli
 
 import (
 	"context"
+	"errors"
+	"net"
 	"os"
 	"path/filepath"
+	"syscall"
 
 	"repairflow/internal/config"
 	"repairflow/internal/db"
@@ -81,6 +84,12 @@ func runServe(ctx context.Context, opts options, args []string, getenv Env) (any
 		"environment", status.Config.App.Environment, "config_version", status.Config.ConfigVersion,
 		"schema_version", db.LatestVersion())
 	if err := web.ListenAndServe(ctx, status.Config.Web.Host, status.Config.Web.Port, srv.Handler()); err != nil {
+		var opErr *net.OpError
+		if errors.As(err, &opErr) && errors.Is(err, syscall.EADDRINUSE) {
+			return nil, errs.Wrap(errs.CodePortInUse, err,
+				"web port %d on %s is already in use; stop the other process or change web.port",
+				status.Config.Web.Port, status.Config.Web.Host)
+		}
 		return nil, err
 	}
 	return serveReport{Home: home, Host: status.Config.Web.Host, Port: status.Config.Web.Port}, nil

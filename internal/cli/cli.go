@@ -33,6 +33,9 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	opts.logger = logging.New(opts.debug, stderr).With("component", "cli")
 	opts.logger.Debug("command start", "operation", "run", "version", buildinfo.Get().Version)
 	if opts.help {
+		if text, focused := focusedUsage(rest); focused {
+			return writeText(stdout, text)
+		}
 		return writeText(stdout, usageText)
 	}
 	if len(rest) == 0 {
@@ -102,7 +105,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		data, err = runCleanup(opts, rest, getenv)
 	case "user":
 		command = "user " + sub(rest)
-		data, err = runUser(ctx, opts, rest, getenv)
+		data, err = runUser(ctx, stdin, stderr, opts, rest, getenv)
 	case "serve":
 		data, err = runServe(ctx, opts, rest, getenv)
 	case "service":

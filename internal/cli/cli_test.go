@@ -5,6 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -21,9 +25,34 @@ type execResult struct {
 
 func run(t *testing.T, env map[string]string, args ...string) execResult {
 	t.Helper()
+	return runStdin(t, "", env, args...)
+}
+
+// runStdin feeds a scripted stdin (for --password-stdin).
+func runStdin(t *testing.T, stdin string, env map[string]string, args ...string) execResult {
+	t.Helper()
 	var out, errb bytes.Buffer
-	code := Run(context.Background(), args, strings.NewReader(""), &out, &errb, func(key string) string { return env[key] })
+	code := Run(context.Background(), args, strings.NewReader(stdin), &out, &errb, func(key string) string { return env[key] })
 	return execResult{code: code, stdout: out.String(), stderr: errb.String()}
+}
+
+// loginWorks reports whether username/password authenticate against the workspace.
+func loginWorks(t *testing.T, home, username, password string) bool {
+	t.Helper()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	svc, closeDB, err := openService(context.Background(), home, logger)
+	if err != nil {
+		t.Fatalf("open service: %v", err)
+	}
+	defer closeDB()
+	_, _, err = svc.Login(context.Background(), username, password)
+	return err == nil
+}
+
+// oneHumanLine reports whether out is a single non-JSON line of text.
+func oneHumanLine(out string) bool {
+	lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
+	return len(lines) == 1 && !strings.Contains(out, "{")
 }
 
 func decode(t *testing.T, raw string) map[string]any {
@@ -376,4 +405,268 @@ func TestMissingHomeFlagValue(t *testing.T) {
 func dirExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
+}
+
+// TestUserTextOutput checks the human account output: one short line per
+// command, with the JSON payload unchanged underneath.
+func TestUserTextOutput(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "ws")
+	env := map[string]string{"USER": "tester", "REPAIRFLOW_NEW_PASSWORD": "password12345"}
+	if res := run(t, env, "init", "--home", home); res.code != 0 {
+		t.Fatalf("init: %s", res.stderr)
+	}
+	res := run(t, env, "user", "list", "--home", home)
+	if res.code != 0 || res.stdout != "no accounts\n" {
+		t.Fatalf("empty account list: code=%d stdout=%q stderr=%q", res.code, res.stdout, res.stderr)
+	}
+	res = run(t, env, "user", "add", "alice", "--role", "admin", "--home", home)
+	if res.code != 0 {
+		t.Fatalf("user add: %s", res.stderr)
+	}
+	if !oneHumanLine(res.stdout) || !strings.Contains(res.stdout, "alice") || !strings.Contains(res.stdout, "admin") {
+		t.Fatalf("user add must print one human line: %q", res.stdout)
+	}
+	if res := run(t, env, "user", "add", "bob", "--role", "technician", "--home", home); res.code != 0 {
+		t.Fatalf("user add bob: %s", res.stderr)
+	}
+
+	res = run(t, env, "user", "list", "--home", home)
+	if !regexp.MustCompile(`(?m)^#\d+ alice \(admin, active\) created \S+$`).MatchString(res.stdout) {
+		t.Fatalf("list line: %q", res.stdout)
+	}
+	if !strings.Contains(res.stdout, "(technician, active)") || strings.Contains(res.stdout, "{") {
+		t.Fatalf("user list must be human text: %q", res.stdout)
+	}
+
+	for _, sub := range []string{"disable", "enable"} {
+		res = run(t, env, "user", sub, "bob", "--home", home)
+		if res.code != 0 || !oneHumanLine(res.stdout) || !strings.Contains(res.stdout, "bob") {
+			t.Fatalf("user %s: code=%d stdout=%q stderr=%q", sub, res.code, res.stdout, res.stderr)
+		}
+	}
+	res = run(t, env, "user", "passwd", "bob", "--home", home)
+	if res.code != 0 || !oneHumanLine(res.stdout) || !strings.Contains(res.stdout, "bob") {
+		t.Fatalf("user passwd text: code=%d stdout=%q stderr=%q", res.code, res.stdout, res.stderr)
+	}
+	if strings.Contains(res.stdout+res.stderr, "password12345") {
+		t.Fatal("password leaked into output")
+	}
+
+	// JSON output is byte-identical to the pre-change contract.
+	res = run(t, env, "user", "passwd", "bob", "--home", home, "--json")
+	if want := `"data":{"password_changed":true,"sessions_revoked":true,"username":"bob"}`; !strings.Contains(res.stdout, want) {
+		t.Fatalf("passwd JSON changed: %q", res.stdout)
+	}
+	res = run(t, env, "user", "list", "--home", home, "--json")
+	if want := `{"ok":true,"command":"user list","contract":2,"data":[{"id":1,"username":"alice"`; !strings.HasPrefix(res.stdout, want) {
+		t.Fatalf("list JSON changed: %q", res.stdout)
+	}
+}
+
+// TestPasswordStdin covers the explicit --password-stdin source and its
+// precedence over REPAIRFLOW_NEW_PASSWORD.
+func TestPasswordStdin(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "ws")
+	env := map[string]string{"USER": "tester", "REPAIRFLOW_NEW_PASSWORD": "env-password-1"}
+	base := []string{"--home", home}
+	if res := run(t, env, "init", "--home", home); res.code != 0 {
+		t.Fatalf("init: %s", res.stderr)
+	}
+	// A trailing CRLF is stripped, and the flag wins over the environment.
+	res := runStdin(t, "flag-password-1\r\n", env, append([]string{"user", "add", "alice", "--role", "admin", "--password-stdin"}, base...)...)
+	if res.code != 0 {
+		t.Fatalf("user add --password-stdin: exit %d %s", res.code, res.stderr)
+	}
+	if strings.Contains(res.stdout+res.stderr, "flag-password-1") {
+		t.Fatal("password leaked into output")
+	}
+	if !loginWorks(t, home, "alice", "flag-password-1") {
+		t.Fatal("--password-stdin password must be stored")
+	}
+	if loginWorks(t, home, "alice", "env-password-1") {
+		t.Fatal("the explicit --password-stdin value must win over REPAIRFLOW_NEW_PASSWORD")
+	}
+
+	// passwd accepts the same flag.
+	res = runStdin(t, "changed-password-2\n", env, append([]string{"user", "passwd", "alice", "--password-stdin"}, base...)...)
+	if res.code != 0 || !loginWorks(t, home, "alice", "changed-password-2") {
+		t.Fatalf("user passwd --password-stdin: exit %d %s", res.code, res.stderr)
+	}
+
+	// Empty stdin line is a usage error and changes nothing.
+	res = runStdin(t, "\n", env, append([]string{"user", "passwd", "alice", "--password-stdin"}, base...)...)
+	if res.code != 2 || !strings.Contains(res.stderr, "--password-stdin") {
+		t.Fatalf("empty stdin password: exit %d %s", res.code, res.stderr)
+	}
+
+	// Too short: refused by the CLI with a clear message, before the service.
+	short := map[string]string{"USER": "tester"}
+	res = runStdin(t, "short\n", short, append([]string{"user", "add", "bob", "--role", "admin", "--password-stdin"}, base...)...)
+	if res.code != 2 || !strings.Contains(res.stderr, "at least 6 characters") {
+		t.Fatalf("short password: exit %d %s", res.code, res.stderr)
+	}
+
+	// No source and a non-terminal stdin keeps today's usage error.
+	res = run(t, short, append([]string{"user", "add", "bob", "--role", "admin"}, base...)...)
+	if res.code != 2 || !strings.Contains(res.stderr, "REPAIRFLOW_NEW_PASSWORD") {
+		t.Fatalf("missing password: exit %d %s", res.code, res.stderr)
+	}
+}
+
+// TestFocusedCommandHelp checks that "<command> --help" prints a short usage
+// block for that command instead of the global page.
+func TestFocusedCommandHelp(t *testing.T) {
+	globalLines := strings.Count(usageText, "\n")
+	for _, tc := range []struct {
+		args      []string
+		name      string
+		unrelated string
+	}{
+		{[]string{"init", "--help"}, "init", "attachment purge"},
+		{[]string{"serve", "--help"}, "serve", "customer add"},
+		{[]string{"user", "--help"}, "user", "backup create"},
+		{[]string{"user", "add", "--help"}, "user add", "estimate create"},
+		{[]string{"service", "--help"}, "service", "restore ARCHIVE"},
+		{[]string{"update", "--help"}, "update", "repair stage"},
+	} {
+		res := run(t, nil, tc.args...)
+		if res.code != 0 {
+			t.Fatalf("%v: exit %d %s", tc.args, res.code, res.stderr)
+		}
+		if !strings.Contains(res.stdout, tc.name) {
+			t.Errorf("%v: focused help does not name %q: %q", tc.args, tc.name, res.stdout)
+		}
+		if strings.Contains(res.stdout, tc.unrelated) {
+			t.Errorf("%v: focused help leaks unrelated command %q", tc.args, tc.unrelated)
+		}
+		if lines := strings.Count(res.stdout, "\n"); lines >= globalLines {
+			t.Errorf("%v: focused help (%d lines) must be shorter than the global page (%d lines)", tc.args, lines, globalLines)
+		}
+	}
+	// The global page is still what bare help prints.
+	if res := run(t, nil, "help"); res.stdout != usageText {
+		t.Fatal("bare help must still print the global page")
+	}
+}
+
+// TestServePortInUseClassifiesEADDRINUSE pins the stable port_in_use code
+// (exit 3) without touching internal/web.
+func TestServePortInUse(t *testing.T) {
+	// serve replaces TMPDIR with the workspace staging dir; restore it so the
+	// testing package can clean up this test's own temporary directories.
+	t.Setenv("TMPDIR", os.TempDir())
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer func() { _ = ln.Close() }()
+	port := ln.Addr().(*net.TCPAddr).Port
+
+	home := filepath.Join(t.TempDir(), "ws")
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cfg := fmt.Sprintf("config_version = 1\n[web]\nhost = \"127.0.0.1\"\nport = %d\n", port)
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res := run(t, nil, "serve", "--home", home, "--json")
+	if res.code != 3 {
+		t.Fatalf("port in use exit %d, want 3 (stderr %s)", res.code, res.stderr)
+	}
+	body, _ := decode(t, res.stderr)["error"].(map[string]any)
+	if body["code"] != "port_in_use" {
+		t.Fatalf("error body: %v", body)
+	}
+}
+
+// TestServiceInstallHints checks the additive web/log/status hints.
+func TestServiceInstallHints(t *testing.T) {
+	home := initWorkspace(t, filepath.Join(t.TempDir(), "ws"))
+	unitDir := filepath.Join(t.TempDir(), "units")
+	env := map[string]string{"REPAIRFLOW_UNIT_DIR": unitDir}
+
+	res := run(t, env, "service", "install", "--init", "systemd", "--no-enable", "--home", home)
+	if res.code != 0 {
+		t.Fatalf("install: exit %d %s", res.code, res.stderr)
+	}
+	for _, want := range []string{
+		"web: http://127.0.0.1:8091/login",
+		"log: journalctl --user -u repairflow.service",
+		"status: systemctl --user status repairflow.service",
+	} {
+		if !strings.Contains(res.stdout, want) {
+			t.Errorf("install text missing %q:\n%s", want, res.stdout)
+		}
+	}
+
+	res = run(t, env, "service", "install", "--init", "systemd", "--no-enable", "--home", home, "--json")
+	data, _ := decode(t, res.stdout)["data"].(map[string]any)
+	if data["web_url"] != "http://127.0.0.1:8091/login" ||
+		data["log_location"] != "journalctl --user -u repairflow.service" ||
+		data["status_command"] != "systemctl --user status repairflow.service" {
+		t.Fatalf("install hints: %v", data)
+	}
+
+	// OpenRC reports its own log file and status command.
+	initDir := filepath.Join(t.TempDir(), "init.d")
+	res = run(t, map[string]string{"REPAIRFLOW_INIT_DIR": initDir},
+		"service", "install", "--init", "openrc", "--no-enable", "--home", home)
+	if res.code != 0 {
+		t.Fatalf("openrc install: exit %d %s", res.code, res.stderr)
+	}
+	for _, want := range []string{
+		"log: " + filepath.Join(home, "logs", "service.log"),
+		"status: rc-service repairflow status",
+	} {
+		if !strings.Contains(res.stdout, want) {
+			t.Errorf("openrc install text missing %q:\n%s", want, res.stdout)
+		}
+	}
+}
+
+// TestServiceInstallWildcardAndStaged covers a wildcard bind and an
+// unprivileged (staged) install.
+func TestServiceInstallWildcardAndStaged(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "ws")
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cfg := "config_version = 1\n[web]\nhost = \"0.0.0.0\"\nport = 8099\nallow_remote = true\n"
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res := run(t, map[string]string{"REPAIRFLOW_UNIT_DIR": filepath.Join(t.TempDir(), "units")},
+		"service", "install", "--init", "systemd", "--no-enable", "--home", home)
+	if res.code != 0 {
+		t.Fatalf("install: exit %d %s", res.code, res.stderr)
+	}
+	if !strings.Contains(res.stdout, "web: http://127.0.0.1:8099/login") {
+		t.Errorf("wildcard bind must print the loopback URL:\n%s", res.stdout)
+	}
+	if !strings.Contains(res.stdout, "all interfaces") {
+		t.Errorf("wildcard bind must warn about all interfaces:\n%s", res.stdout)
+	}
+
+	// An unwritable init directory stages the OpenRC script: never claim it runs.
+	stagedDir := filepath.Join(t.TempDir(), "readonly")
+	if err := os.MkdirAll(stagedDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(stagedDir, 0o755) })
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: the init directory is writable")
+	}
+	res = run(t, map[string]string{"REPAIRFLOW_INIT_DIR": stagedDir},
+		"service", "install", "--init", "openrc", "--no-enable", "--home", initWorkspace(t, filepath.Join(t.TempDir(), "ws2")))
+	if res.code != 0 {
+		t.Fatalf("staged install: exit %d %s", res.code, res.stderr)
+	}
+	if !strings.Contains(res.stdout, "staged") || !strings.Contains(res.stdout, "command:") {
+		t.Errorf("staged install must say it is staged and print the command:\n%s", res.stdout)
+	}
+	if strings.Contains(res.stdout, "active=running") {
+		t.Errorf("staged install must not claim it is running:\n%s", res.stdout)
+	}
 }

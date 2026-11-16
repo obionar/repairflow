@@ -29,6 +29,17 @@ func renderData(data any) (string, bool) {
 			v.Version, v.Commit, v.BuildDate, v.GoVersion, v.Platform, v.SourceURL), true
 	case app.Customer:
 		return renderCustomer(v), true
+	case app.User:
+		return renderUserLine(v) + "\n", true
+	case []app.User:
+		out := ""
+		for _, u := range v {
+			out += renderUserLine(u) + " created " + u.CreatedAt + "\n"
+		}
+		if out == "" {
+			out = "no accounts\n"
+		}
+		return out, true
 	case customerShow:
 		out := renderCustomer(v.Customer)
 		out += "history:\n"
@@ -186,23 +197,22 @@ func renderData(data any) (string, bool) {
 	case *signResult:
 		return fmt.Sprintf("signature written: %s (key %s)\n", v.SignatureFile, v.PublicKeyHex), true
 	case *service.Result:
-		out := "unit: " + v.UnitPath + " (present=" + itoaBool(v.Present) + ")"
-		if v.UnitPath == "" {
-			out = "unit: none (present=false)"
-		}
-		if v.Active != "" {
-			out += " active=" + v.Active
-		}
+		return renderService(v), true
+	case *serviceReport:
+		out, _ := renderData(v.Result)
 		if v.StagedPath != "" {
-			out += "\nstaged: " + v.StagedPath
+			out += "note: unit is staged and not running; install it with the command above\n"
 		}
-		if v.Warning != "" {
-			out += "\nwarning: " + v.Warning
+		if v.WebURL != "" {
+			out += "web: " + v.WebURL + "\n"
 		}
-		if v.Command != "" {
-			out += "\ncommand: " + v.Command
+		if v.LogLocation != "" {
+			out += "log: " + v.LogLocation + "\n"
 		}
-		return out + "\n", true
+		if v.StatusCommand != "" {
+			out += "status: " + v.StatusCommand + "\n"
+		}
+		return out, true
 	case *workspace.CleanupResult:
 		return fmt.Sprintf("cleanup: removed %d staging file(s), %d cache entr(ies), kept %d\n",
 			len(v.StagingRemoved), len(v.CacheRemoved), len(v.Skipped)), true
@@ -216,6 +226,36 @@ func renderData(data any) (string, bool) {
 func renderCustomer(c app.Customer) string {
 	return fmt.Sprintf("customer #%d %s\nphone: %s\nemail: %s\naddress: %s\nnotes: %s\nrevision: %s\ncreated: %s\nupdated: %s\n",
 		c.ID, c.Name, c.Phone, c.Email, c.Address, c.Notes, c.Revision, c.CreatedAt, c.UpdatedAt)
+}
+
+// renderUserLine is the one account line shared by `user list` and the account
+// change commands.
+func renderUserLine(u app.User) string {
+	state := "inactive"
+	if u.Active {
+		state = "active"
+	}
+	return fmt.Sprintf("#%d %s (%s, %s)", u.ID, u.Username, u.Role, state)
+}
+
+func renderService(v *service.Result) string {
+	out := "unit: " + v.UnitPath + " (present=" + itoaBool(v.Present) + ")"
+	if v.UnitPath == "" {
+		out = "unit: none (present=false)"
+	}
+	if v.Active != "" {
+		out += " active=" + v.Active
+	}
+	if v.StagedPath != "" {
+		out += "\nstaged: " + v.StagedPath
+	}
+	if v.Warning != "" {
+		out += "\nwarning: " + v.Warning
+	}
+	if v.Command != "" {
+		out += "\ncommand: " + v.Command
+	}
+	return out + "\n"
 }
 
 func renderRepair(t app.Repair) string {

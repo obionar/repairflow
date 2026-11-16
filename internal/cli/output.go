@@ -8,8 +8,21 @@ import (
 	"repairflow/internal/errs"
 )
 
+// textResult pairs a machine payload with its human line so a command can
+// render text without changing the documented JSON shape.
+type textResult struct {
+	data any
+	text string
+}
+
 // ok renders a successful result.
 func ok(w io.Writer, command string, asJSON bool, data any) int {
+	if t, isText := data.(textResult); isText {
+		if !asJSON {
+			return writeText(w, t.text)
+		}
+		data = t.data
+	}
 	if asJSON {
 		return writeJSON(w, envelope{OK: true, Command: command, Contract: contractVersion, Data: data})
 	}
@@ -80,6 +93,72 @@ func writeJSON(w io.Writer, v any) int {
 	return 0
 }
 
+// Focused per-command help. Each line is the same usage string the command
+// reports when it is misused, so there is one flag matrix (docs/CLI-CONTRACT.md
+// is the other). Unknown commands fall back to the global page.
+const (
+	usageUser        = "repairflow user <add|list|passwd|enable|disable> ..."
+	usageUserAdd     = "repairflow user add USERNAME --role admin|technician|viewer [--password-stdin]"
+	usageUserList    = "repairflow user list"
+	usageUserPasswd  = "repairflow user passwd USERNAME [--password-stdin]"
+	usageUserEnable  = "repairflow user enable USERNAME"
+	usageUserDisable = "repairflow user disable USERNAME"
+	usageServe       = "repairflow serve"
+	usageService     = "repairflow service <install|status|remove> ..."
+)
+
+var commandUsage = map[string]string{
+	"init":            "repairflow init [--demo [--demo-user USERNAME]] [--language CODE] | init --interactive",
+	"config check":    "repairflow config check",
+	"status":          "repairflow status",
+	"doctor":          "repairflow doctor",
+	"cleanup":         "repairflow cleanup",
+	"serve":           usageServe,
+	"customer":        "repairflow customer <add|list|show|history|update|archive|unarchive> ...",
+	"repair":          "repairflow repair <add|list|show|update|stage|entry|pickup|label|archive|part-*> ...",
+	"printer":         "repairflow printer <show|set|test> ...",
+	"estimate":        "repairflow estimate <create|list|show|accept> ...",
+	"attachment":      "repairflow attachment <add|list|show|export|caption|link|unlink|detach|restore|purge> ...",
+	"user":            usageUser,
+	"user add":        usageUserAdd,
+	"user list":       usageUserList,
+	"user passwd":     usageUserPasswd,
+	"user enable":     usageUserEnable,
+	"user disable":    usageUserDisable,
+	"backup":          "repairflow backup <create|verify> ...",
+	"restore":         "repairflow restore ARCHIVE --home PATH",
+	"seed":            "repairflow seed demo [--demo-user USERNAME]",
+	"demo":            "repairflow demo reset --confirm",
+	"service":         usageService,
+	"service install": "repairflow service install [--init systemd|openrc|none] [--name NAME] [--no-enable]",
+	"service status":  "repairflow service status [--init systemd|openrc|none] [--name NAME]",
+	"service remove":  "repairflow service remove [--init systemd|openrc|none] [--name NAME]",
+	"update":          "repairflow update <check|apply|keygen|sign> ...",
+	"version":         "repairflow version",
+	"help":            "repairflow help",
+}
+
+// focusedUsage renders the short help block for the requested command (and
+// subcommand) and reports whether it is known.
+func focusedUsage(args []string) (string, bool) {
+	if len(args) == 0 {
+		return "", false
+	}
+	key := args[0]
+	if len(args) > 1 {
+		if _, ok := commandUsage[key+" "+args[1]]; ok {
+			key += " " + args[1]
+		}
+	}
+	line, ok := commandUsage[key]
+	if !ok {
+		return "", false
+	}
+	return "Usage:\n  " + line +
+		"\n\nGlobal flags: --home PATH, --json, --debug, --version, --help/-h.\n" +
+		"Run \"repairflow help\" for the full command list.\n", true
+}
+
 const usageText = `repairflow - local-first repair-shop workspace (single Go binary)
 
 Usage:
@@ -146,9 +225,11 @@ Attachments (original bytes, hash-verified; detach/restore/purge with retention)
   attachment link ID --entry E | attachment unlink ID --entry E
   attachment detach ID | attachment restore ID | attachment purge ID --confirm
 
-Accounts:
-  user add USERNAME --role admin|technician|viewer   (password via REPAIRFLOW_NEW_PASSWORD)
-  user list | user passwd USERNAME | user enable USERNAME | user disable USERNAME
+Accounts (password via --password-stdin, REPAIRFLOW_NEW_PASSWORD or an
+interactive prompt; 6-256 characters, never a command-line argument):
+  user add USERNAME --role admin|technician|viewer [--password-stdin]
+  user list | user passwd USERNAME [--password-stdin]
+  user enable USERNAME | user disable USERNAME
 
 Backup and restore (verified .rfbak archives):
   backup create --output ABSOLUTE_PATH   # consistent DB snapshot + verified originals

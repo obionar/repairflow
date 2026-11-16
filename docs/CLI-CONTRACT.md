@@ -202,16 +202,24 @@ For one release, `attachment add` and `attachment list` also accept `--ticket ID
 ## Accounts
 
 ```text
-user add USERNAME --role admin|technician|viewer
+user add USERNAME --role admin|technician|viewer [--password-stdin]
 user list
-user passwd USERNAME
+user passwd USERNAME [--password-stdin]
 user enable USERNAME
 user disable USERNAME
 ```
 
-`user add` and `user passwd` read the new password from `REPAIRFLOW_NEW_PASSWORD`. Passwords must be
-6–256 characters. Password and account changes revoke affected sessions. Disabling the last active
-admin is refused.
+`user add` and `user passwd` take the new password from `--password-stdin` (one line on stdin;
+the flag wins when `REPAIRFLOW_NEW_PASSWORD` is also set), from `REPAIRFLOW_NEW_PASSWORD`,
+or, on a terminal with neither, from a double prompt on stderr. Without any source and with a
+non-terminal stdin the command is a usage error. Passwords are never echoed and never read from
+command-line arguments. Passwords must be 6–256 characters; the CLI refuses a shorter or longer
+value before any account is touched. Password and account changes revoke affected sessions.
+Disabling the last active admin is refused.
+
+Text output: `user list` prints one `#ID USERNAME (ROLE, active|inactive) created TIMESTAMP` line
+per account and `no accounts` when the workspace has none. `user add`, `user passwd`, `user enable`
+and `user disable` print one short human line. `--json` output is unchanged.
 
 ## Backup and restore
 
@@ -246,7 +254,14 @@ help
 
 Service installation supports systemd user units and OpenRC scripts. `--name` selects an independent
 instance; units belonging to another instance are not overwritten or removed. An existing file with
-no `managed-by=repairflow` marker is refused rather than replaced.
+no `managed-by=repairflow` marker is refused rather than replaced. `service install` also reports,
+when the workspace config is readable, `web_url` (the login URL for the configured host and port;
+a wildcard bind such as `0.0.0.0` is reported as `http://127.0.0.1:PORT/login` plus a warning that
+it listens on all interfaces), `log_location` (OpenRC `<home>/logs/service.log`, systemd
+`journalctl --user -u UNIT`) and `status_command` (`rc-service NAME status` or
+`systemctl --user status UNIT`). These three fields are additive: they appear on install output only.
+A staged (unprivileged) install reports the staged path and the exact install command, and never
+claims the service is running.
 
 Updates use local files only and require Ed25519 signature and SHA-256 verification. The optional
 `scripts/update-github.sh` downloads one exact public GitHub release archive into temporary storage,
@@ -291,7 +306,7 @@ stderr. Error codes and exit statuses are stable; human-readable messages may ch
 | 0 | — | Success |
 | 1 | `internal_error` | Unexpected failure; retry with debug diagnostics |
 | 2 | `usage_error`, `validation_error`, `unsafe_path`, `permission_refused` | Invalid input or refused path/permission |
-| 3 | `workspace_exists`, `workspace_not_initialized`, `config_invalid`, `config_version_unsupported`, `conflict` | Workspace, configuration, schema or state conflict |
+| 3 | `workspace_exists`, `workspace_not_initialized`, `config_invalid`, `config_version_unsupported`, `conflict`, `port_in_use` | Workspace, configuration, schema, state or listener conflict |
 | 4 | `not_found` | Referenced record or resource is absent |
 
 ## Core JSON shapes
