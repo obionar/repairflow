@@ -27,40 +27,43 @@ type ResetResult struct {
 // The CLI additionally requires an explicit --confirm (destructive-action
 // review). There is no automatic or scheduled reset anywhere.
 func Reset(ctx context.Context, svc *app.Service) (*ResetResult, error) {
-	found, checksum, err := svc.SeedMarker(ctx, DemoKey)
-	if err != nil {
-		return nil, err
+	validate := func(ctx context.Context) error {
+		found, checksum, err := svc.SeedMarker(ctx, DemoKey)
+		if err != nil {
+			return err
+		}
+		if !found || checksum != manifestChecksum() {
+			return errs.New(errs.CodeConflict,
+				"refusing demo reset: workspace is not a proven demo dataset (seed marker missing or dataset version differs)")
+		}
+		// Content-level provenance: the live workspace content must still match
+		// the fingerprint recorded at seed time, so any operator edit — even one
+		// that keeps the record counts intact — invalidates the reset.
+		stateFound, wantFingerprint, err := svc.SeedMarker(ctx, DemoStateKey)
+		if err != nil {
+			return err
+		}
+		liveFingerprint, err := svc.BusinessFingerprint(ctx)
+		if err != nil {
+			return err
+		}
+		if !stateFound || liveFingerprint != wantFingerprint {
+			return errs.New(errs.CodeConflict,
+				"refusing demo reset: workspace content was modified after seeding")
+		}
+		c, t, e, p, est, a, err := svc.BusinessCounts(ctx)
+		if err != nil {
+			return err
+		}
+		if c != DemoCustomers || t != DemoRepairs || e != DemoEntries || p != DemoParts ||
+			est != DemoEstimates || a != DemoAttachments {
+			return errs.New(errs.CodeConflict,
+				"refusing demo reset: workspace was modified after seeding (%d customers, %d repairs, %d entries, %d parts, %d estimates, %d attachments; demo has %d/%d/%d/%d/%d/%d)",
+				c, t, e, p, est, a, DemoCustomers, DemoRepairs, DemoEntries, DemoParts, DemoEstimates, DemoAttachments)
+		}
+		return nil
 	}
-	if !found || checksum != manifestChecksum() {
-		return nil, errs.New(errs.CodeConflict,
-			"refusing demo reset: workspace is not a proven demo dataset (seed marker missing or dataset version differs)")
-	}
-	// Content-level provenance: the live workspace content must still match
-	// the fingerprint recorded at seed time, so any operator edit — even one
-	// that keeps the record counts intact — invalidates the reset.
-	stateFound, wantFingerprint, err := svc.SeedMarker(ctx, DemoStateKey)
-	if err != nil {
-		return nil, err
-	}
-	liveFingerprint, err := svc.BusinessFingerprint(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if !stateFound || liveFingerprint != wantFingerprint {
-		return nil, errs.New(errs.CodeConflict,
-			"refusing demo reset: workspace content was modified after seeding")
-	}
-	c, t, e, p, est, a, err := svc.BusinessCounts(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if c != DemoCustomers || t != DemoRepairs || e != DemoEntries || p != DemoParts ||
-		est != DemoEstimates || a != DemoAttachments {
-		return nil, errs.New(errs.CodeConflict,
-			"refusing demo reset: workspace was modified after seeding (%d customers, %d repairs, %d entries, %d parts, %d estimates, %d attachments; demo has %d/%d/%d/%d/%d/%d)",
-			c, t, e, p, est, a, DemoCustomers, DemoRepairs, DemoEntries, DemoParts, DemoEstimates, DemoAttachments)
-	}
-	if err := svc.ClearBusinessRecords(ctx); err != nil {
+	if err := svc.ClearBusinessRecords(ctx, validate); err != nil {
 		return nil, err
 	}
 	seeded, err := Demo(ctx, svc)

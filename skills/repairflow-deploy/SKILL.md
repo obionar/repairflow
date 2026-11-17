@@ -79,8 +79,8 @@ BIN="$BIN_DIR/repairflow"
 Compare version AND commit with the approved artifact. Keep `LICENSE`, `manifest.json` and
 `manifest.sig` or the complete archive. For source installation, review `$REPO/install-repairflow`
 before invoking it: its default is `$HOME/.local/bin/repairflow`, with `REPAIRFLOW_PREFIX` selecting
-another prefix. It builds, then installs under the executable lock, but can also run `init` on an
-existing `REPAIRFLOW_HOME`/default workspace; it is not a data-free verification command.
+another prefix. It builds, then installs under the executable lock and runs `config check` on an
+existing `REPAIRFLOW_HOME`/default workspace without opening or migrating its database.
 
 The default user-owned installation needs no privilege. A deliberately selected shared
 `/usr/local/bin` layout is root-owned and needs `sudo`/`doas` to install/replace it; never make it
@@ -163,7 +163,8 @@ archive also ships `repairflow-update` and `repairflow-autoupdate`; consult thei
 and `docs/DEPLOY.md` before using them. Do not configure unattended activation without approval.
 
 `repairflow-autoupdate` is fail-closed: it verifies the effective unit's pinned binary and `--home`
-(on systemd, the loaded `FragmentPath`; it refuses `daemon-reload` needs and drop-in overrides), stops the
+(on systemd, the loaded `FragmentPath`; it refuses `daemon-reload` needs and drop-in overrides), refuses
+downgrades during the check, and stops the
 intended service before the backup and swap, and after the restart requires the configured endpoint
 to serve the exact `about-version`/`about-commit` values, the candidate's `doctor` to pass, and the
 record count to be unchanged before reporting success. Any HTTP response from the old endpoint

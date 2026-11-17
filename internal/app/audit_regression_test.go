@@ -191,4 +191,9 @@ func TestLegacyCustomerIdempotencyStillReplays(t *testing.T) {
 	if replay.ID != first.ID {
 		t.Fatalf("legacy replay returned customer %d, want %d", replay.ID, first.ID)
 	}
+	changed := in
+	changed.Address = "A different address"
+	if _, err := svc.CreateCustomerWithKey(ctx, "tester", changed, key); errs.CodeOf(err) != errs.CodeConflict {
+		t.Fatalf("legacy key with changed address must conflict, got: %v", err)
+	}
 }

@@ -70,9 +70,10 @@ and accounts; newer schemas are still refused. `--language` is applied only when
 config: on an existing workspace it is ignored, JSON reports `ignored:["language"]` when supplied,
 and human output says the existing language was kept.
 
-`doctor` does not migrate or modify records: it reports a missing or outdated schema, and
+`doctor` does not migrate or modify business records: it reports a missing or outdated schema, and
 checks workspace, database integrity, records, demo marker and the stored attachment bytes (size and
-SHA-256, so a large gallery takes longer). `cleanup` removes stale upload staging and cache only; it
+SHA-256, so a large gallery takes longer). It may create or tighten the SQLite file and restore or
+finalize interrupted attachment-deletion links before reporting those checks. `cleanup` removes stale upload staging and cache only; it
 never removes business records, attachments, configuration, backups or recovery data.
 
 `serve` binds `web.host:web.port` before reporting readiness. Startup logs the actual `/login` URL,
@@ -285,8 +286,8 @@ the binary and every parent directory (`stat` is required).
 platform, version, size and hash checks are mandatory. Same-version installs, downgrades, symlinks and
 FIFOs are refused. The target directory must be writable. Updates and source installs serialize with
 a lock next to the executable; the updater re-reads the installed version under that lock rather
-than trusting the invoking process's version. A root-owned installation needs `sudo`/`doas` for apply. Verified apply
-is Linux-only; restart through the service supervisor after success.
+than trusting the invoking process's version. A root-owned installation needs `sudo`/`doas` for apply. Both `update check` and `update apply` refuse downgrades before an unattended updater stops the
+service. Verified apply is Linux-only; restart through the service supervisor after success.
 
 `update verify` checks a detached Ed25519 signature over any file against the release public key
 embedded in the build. It is how the signed `SHA256SUMS` list is authenticated before an archive is

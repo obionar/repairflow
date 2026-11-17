@@ -79,6 +79,19 @@ func TestVersionJSON(t *testing.T) {
 	}
 }
 
+func TestGlobalErrorsHonorJSON(t *testing.T) {
+	for _, args := range [][]string{{"--json", "--home"}, {"--home", "--json"}} {
+		res := run(t, nil, args...)
+		if res.code != 2 || res.stdout != "" {
+			t.Fatalf("global error %v: %+v", args, res)
+		}
+		body := decode(t, res.stderr)
+		if body["ok"] != false || body["error"].(map[string]any)["code"] != "usage_error" {
+			t.Fatalf("global error %v is not a JSON envelope: %q", args, res.stderr)
+		}
+	}
+}
+
 func TestVersionText(t *testing.T) {
 	res := run(t, nil, "--version")
 	if res.code != 0 || !strings.HasPrefix(res.stdout, "repairflow ") {
@@ -115,7 +128,7 @@ func TestUsageCoversEveryDocumentedCommand(t *testing.T) {
 		"user add", "user list", "user passwd", "user enable", "user disable",
 		"backup create", "backup verify", "restore ARCHIVE",
 		"service install", "service status", "service remove",
-		"update check", "update apply", "update keygen", "update sign",
+		"update check", "update apply", "update verify", "update keygen", "update sign",
 		"seed demo", "demo reset", "version", "help",
 	}
 	for _, want := range required {

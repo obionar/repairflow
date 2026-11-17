@@ -123,7 +123,9 @@ reconciliation expose missing or orphaned bytes. Backups combine a consistent `V
 snapshot with hash-verified original files. Verification and restore share archive membership,
 size/hash, database integrity/schema/attachment and configuration validation. Verification extracts
 only the database and config temporarily; restore stages all payloads before publishing into an
-empty destination. Local translation overrides are not archived.
+empty destination. Publication uses no-replace operations, including late-arriving destination
+files, and a publish error rolls back files owned by that restore attempt. Local translation
+overrides are not archived.
 
 Attachment purge and demo reset use a cross-process workspace lock and same-filesystem recovery
 links under `files/.purge/`. Original bytes are preserved until the database transaction commits,

@@ -88,7 +88,15 @@ func (s *Server) repairPartAdd(w http.ResponseWriter, r *http.Request, sess app.
 }
 
 func (s *Server) repairPartUpdate(w http.ResponseWriter, r *http.Request, sess app.Session) {
+	repairID, err := pathID(r, "id")
+	if err != nil {
+		s.postResult(w, r, sess, err, "/repairs/"+r.PathValue("id"))
+		return
+	}
 	partID, err := pathID(r, "pid")
+	if err == nil {
+		err = s.requirePartParent(r, repairID, partID)
+	}
 	if err != nil {
 		s.postResult(w, r, sess, err, "/repairs/"+r.PathValue("id"))
 		return
@@ -103,7 +111,6 @@ func (s *Server) repairPartUpdate(w http.ResponseWriter, r *http.Request, sess a
 		}, r.FormValue("revision"))
 	}
 	if err != nil {
-		repairID := parseFormID(r.PathValue("id"))
 		s.repairFormError(w, r, sess, repairID, err, func(view *repairView) {
 			view.PartForms[partID] = partFormFromRequest(r, partID)
 		})
@@ -118,6 +125,13 @@ func (s *Server) repairPartRemove(w http.ResponseWriter, r *http.Request, sess a
 		if err != nil {
 			return err
 		}
+		repairID, err := pathID(r, "id")
+		if err != nil {
+			return err
+		}
+		if err := s.requirePartParent(r, repairID, partID); err != nil {
+			return err
+		}
 		_, err = s.svc.DeleteRepairPart(r.Context(), actorOf(sess), partID)
 		return err
 	})
@@ -127,6 +141,13 @@ func (s *Server) repairPartRestore(w http.ResponseWriter, r *http.Request, sess 
 	s.repairMutation(w, r, sess, func() error {
 		partID, err := pathID(r, "pid")
 		if err != nil {
+			return err
+		}
+		repairID, err := pathID(r, "id")
+		if err != nil {
+			return err
+		}
+		if err := s.requirePartParent(r, repairID, partID); err != nil {
 			return err
 		}
 		_, err = s.svc.RestoreRepairPart(r.Context(), actorOf(sess), partID)

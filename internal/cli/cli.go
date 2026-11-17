@@ -27,7 +27,16 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	debug := logging.DebugEnabled(false, getenv(EnvDebug))
 	opts, rest, err := parseGlobalFlags(args)
 	if err != nil {
-		return fail(stderr, "", false, err, debug)
+		asJSON := opts.json
+		for _, arg := range args {
+			if arg == "--" {
+				break
+			}
+			if arg == "--json" {
+				asJSON = true
+			}
+		}
+		return fail(stderr, "", asJSON, err, debug)
 	}
 	opts.debug = logging.DebugEnabled(opts.debug, getenv(EnvDebug))
 	opts.logger = logging.New(opts.debug, stderr).With("component", "cli")

@@ -58,34 +58,35 @@ func validateIdempotencyKey(key string) error {
 // replayResult reads a stored result for a matching key/fingerprint and
 // decodes it into out. Mismatched fingerprints are conflicts. legacyWant
 // carries fingerprints accepted from records written before a payload field
-// was added, so an upgrade does not turn an old retry into a false conflict.
-func (s *Service) replayResult(ctx context.Context, key, operation, want string, scope int64, out any, legacyWant ...string) (bool, error) {
+// was added. legacyMatch lets the caller compare that newly covered field with
+// the stored result before accepting the replay.
+func (s *Service) replayResult(ctx context.Context, key, operation, want string, scope int64, out any, legacyWant ...string) (hit, legacyMatch bool, err error) {
 	var gotFingerprint, resultJSON, gotOperation string
 	var gotScope int64
-	err := s.q(ctx).QueryRowContext(ctx,
+	err = s.q(ctx).QueryRowContext(ctx,
 		`SELECT operation, fingerprint, result_json, scope_id FROM request_idempotency WHERE key = ?`, key).
 		Scan(&gotOperation, &gotFingerprint, &resultJSON, &gotScope)
 	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
+		return false, false, nil
 	}
 	if err != nil {
-		return false, errs.Wrap(errs.CodeInternal, err, "cannot read idempotency record")
+		return false, false, errs.Wrap(errs.CodeInternal, err, "cannot read idempotency record")
 	}
 	match := gotFingerprint == want
 	for _, legacy := range legacyWant {
 		if gotFingerprint == legacy {
-			match = true
+			match, legacyMatch = true, true
 			break
 		}
 	}
 	if !match || gotOperation != operation || gotScope != scope {
-		return false, errs.New(errs.CodeConflict,
+		return false, false, errs.New(errs.CodeConflict,
 			"idempotency key %q was already used for a different request payload", key)
 	}
 	if err := json.Unmarshal([]byte(resultJSON), out); err != nil {
-		return false, errs.Wrap(errs.CodeInternal, err, "cannot decode replayed result for key %q", key)
+		return false, false, errs.Wrap(errs.CodeInternal, err, "cannot decode replayed result for key %q", key)
 	}
-	return true, nil
+	return true, legacyMatch, nil
 }
 
 // storeResult persists the idempotency record inside the caller's transaction.
@@ -140,7 +141,7 @@ func (s *Service) CreateRepairWithKey(ctx context.Context, actor string, in Repa
 	var repair Repair
 	err = s.InTx(ctx, func(ctx context.Context) error {
 		var replayed Repair
-		hit, err := s.replayResult(ctx, key, "repair.create", fp, in.CustomerID, &replayed)
+		hit, _, err := s.replayResult(ctx, key, "repair.create", fp, in.CustomerID, &replayed)
 		if err != nil {
 			return err
 		}
@@ -185,11 +186,15 @@ func (s *Service) CreateCustomerWithKey(ctx context.Context, actor string, in Cu
 	var customer Customer
 	err = s.InTx(ctx, func(ctx context.Context) error {
 		var replayed Customer
-		hit, err := s.replayResult(ctx, key, "customer.create", fp, 0, &replayed, legacyFP)
+		hit, legacy, err := s.replayResult(ctx, key, "customer.create", fp, 0, &replayed, legacyFP)
 		if err != nil {
 			return err
 		}
 		if hit {
+			if legacy && replayed.Address != in.Address {
+				return errs.New(errs.CodeConflict,
+					"idempotency key %q was already used for a different request payload", key)
+			}
 			customer = replayed
 			return nil
 		}

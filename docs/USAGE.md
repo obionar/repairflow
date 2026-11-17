@@ -161,7 +161,8 @@ repairflow doctor --home /absolute/path/restored-workspace
 ```
 
 Restore verifies the archive, database and attachment references before publishing the workspace.
-It never overwrites an existing workspace. Test recovery before you need it.
+It never overwrites an existing workspace or a file that appears during publication. A publication
+failure rolls back files from that restore attempt. Test recovery before you need it.
 
 ## Demo maintenance
 
@@ -187,7 +188,9 @@ repairflow cleanup
 
 - `status` summarizes the workspace and record counts.
 - `doctor` checks configuration, schema, database integrity, and attachment metadata plus the stored
-  bytes (it hash-verifies every retained attachment, so a large gallery takes longer).
+  bytes (it hash-verifies every retained attachment, so a large gallery takes longer). It does not
+  edit business records, but it may create/tighten the SQLite file and resolve interrupted attachment
+  deletion links before reporting health.
 - `cleanup` removes stale upload staging and cache data only; it does not remove records,
   attachments, configuration, backups or recovery data.
 

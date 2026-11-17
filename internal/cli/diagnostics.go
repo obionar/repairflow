@@ -35,8 +35,9 @@ type statusReport struct {
 	DemoSeeded    bool   `json:"demo_seeded"`
 }
 
-// runDoctor performs read-only workspace/database diagnostics. Every check
-// reports its own result; the command exits 3 when anything is unhealthy.
+// runDoctor performs diagnostics without editing business records. Opening the
+// database and resolving interrupted attachment deletes can change files.
+// Every check reports its own result; unhealthy checks produce exit 3.
 func runDoctor(ctx context.Context, opts options, args []string, getenv Env) (doctorReport, error) {
 	if len(args) > 0 {
 		return doctorReport{}, errs.New(errs.CodeUsage, "doctor takes no arguments")
@@ -113,7 +114,7 @@ func runCleanup(opts options, args []string, getenv Env) (any, error) {
 	return workspace.Cleanup(home)
 }
 
-// runStatus reports a compact workspace summary (read-only).
+// runStatus reports a compact workspace summary without editing business records.
 func runStatus(ctx context.Context, opts options, args []string, getenv Env) (statusReport, error) {
 	if len(args) > 0 {
 		return statusReport{}, errs.New(errs.CodeUsage, "status takes no arguments")

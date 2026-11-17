@@ -503,6 +503,8 @@ func TestOpenRCStatusAndRemove(t *testing.T) {
 	if err != nil || !st.Present {
 		t.Fatalf("status after install: %+v %v", st, err)
 	}
+	fakeTool(t, "rc-service", "case \"$2\" in stop) exit 0;; status) echo '* status: stopped'; exit 0;; esac\nexit 1\n")
+	fakeTool(t, "rc-update", "exit 0\n")
 	if res, err = service.Remove(opts); err != nil || res.Present {
 		t.Fatalf("remove: %+v %v", res, err)
 	}

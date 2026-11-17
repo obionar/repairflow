@@ -107,10 +107,10 @@ if [ -n "$old" ]; then
 fi
 
 if [ -f "$workdir/config.toml" ]; then
-  # Idempotent: validates the existing config with the new binary and heals
-  # any missing workspace layout directories. Never rewrites the config.
-  "$bin" init >/dev/null
-  echo "Workspace $workdir kept; its schema migrates on the next command or start."
+  # Validate without opening the database: installation must not migrate a
+  # workspace while its old service is still running.
+  "$bin" config check --home "$workdir" >/dev/null
+  echo "Workspace $workdir kept; configuration checked without migrating its database."
   echo "If a RepairFlow service is installed, rerun: $bin service install --home $workdir"
 else
   echo "No workspace yet. Create one with: repairflow init"

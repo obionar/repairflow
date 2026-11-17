@@ -67,6 +67,33 @@ func TestRemoveStoppedUnitSucceedsWithWarning(t *testing.T) {
 	}
 }
 
+func TestRemoveRefusesUnknownUnitState(t *testing.T) {
+	fakeTool(t, "systemctl", "exit 1\n")
+	unitDir := t.TempDir()
+	unitPath := managedUnit(t, unitDir, service.UnitName, "[Service]\nExecStart=/bin/repairflow\n")
+	_, err := service.Remove(service.Options{Init: service.InitSystemd, UnitDir: unitDir})
+	if err == nil || errs.CodeOf(err) != errs.CodeConflict {
+		t.Fatalf("unknown unit state must refuse removal, got: %v", err)
+	}
+	if _, statErr := os.Stat(unitPath); statErr != nil {
+		t.Fatal("refused removal must leave the unit file")
+	}
+}
+
+func TestOpenRCRemoveRefusesUnknownState(t *testing.T) {
+	fakeTool(t, "rc-service", "exit 1\n")
+	fakeTool(t, "rc-update", "exit 0\n")
+	initDir := t.TempDir()
+	scriptPath := managedUnit(t, initDir, service.OpenRCName, "#!/sbin/openrc-run\n")
+	_, err := service.Remove(service.Options{Init: service.InitOpenRC, InitDir: initDir})
+	if err == nil || errs.CodeOf(err) != errs.CodeConflict {
+		t.Fatalf("unknown service state must refuse removal, got: %v", err)
+	}
+	if _, statErr := os.Stat(scriptPath); statErr != nil {
+		t.Fatal("refused removal must leave the service script")
+	}
+}
+
 // TestOpenRCRemoveRefusesStartedService mirrors the systemd guard on Alpine.
 func TestOpenRCRemoveRefusesStartedService(t *testing.T) {
 	fakeTool(t, "rc-service", "case \"$2\" in status) echo '* status: started'; exit 0;; stop) echo 'failed to stop' >&2; exit 1;; esac\nexit 1\n")

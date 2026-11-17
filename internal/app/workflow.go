@@ -274,7 +274,11 @@ func (s *Service) ArchiveRepair(ctx context.Context, actor string, id int64, arc
 	return s.GetRepairRow(ctx, id)
 }
 
-// getEntry reads one entry row of any state.
+// GetEntry reads one entry row of any state.
+func (s *Service) GetEntry(ctx context.Context, entryID int64) (Entry, error) {
+	return s.getEntry(ctx, entryID)
+}
+
 func (s *Service) getEntry(ctx context.Context, entryID int64) (Entry, error) {
 	var e Entry
 	err := s.q(ctx).QueryRowContext(ctx,

@@ -45,6 +45,10 @@ const SessionTTLS = 24 * time.Hour
 // passwords when the web UI is reachable from a shared network.
 const MinPasswordLength = 6
 
+// dummyPasswordHash keeps unknown and disabled account failures on the same
+// Argon2 path as active accounts. It is not attached to any user record.
+const dummyPasswordHash = "$argon2id$v=19,m=32768,t=3,p=2$MDEyMzQ1Njc4OWFiY2RlZg$WEnILgzhcIMQOD6gu8/uvheHYEHw/bfQiVL7UwIXCrE"
+
 var roleSet = map[string]bool{RoleAdmin: true, RoleTechnician: true, RoleViewer: true}
 
 // CanWrite reports whether a role may perform mutations.
@@ -328,12 +332,16 @@ func (s *Service) Login(ctx context.Context, username, password string) (Session
 	u, hash, err := s.userByName(ctx, strings.TrimSpace(username))
 	if err != nil {
 		if errs.CodeOf(err) == errs.CodeNotFound {
-			// Uniform failure for unknown user and bad password.
+			CheckPassword(dummyPasswordHash, password)
 			return Session{}, "", errs.New(errs.CodeValidation, "invalid username or password")
 		}
 		return Session{}, "", err
 	}
-	if !u.Active || !CheckPassword(hash, password) {
+	if !u.Active {
+		CheckPassword(dummyPasswordHash, password)
+		return Session{}, "", errs.New(errs.CodeValidation, "invalid username or password")
+	}
+	if !CheckPassword(hash, password) {
 		return Session{}, "", errs.New(errs.CodeValidation, "invalid username or password")
 	}
 

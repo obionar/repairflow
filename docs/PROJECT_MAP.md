@@ -68,7 +68,7 @@ parse input and render output. `internal/files` owns attachment paths and origin
 | `internal/web/throttle.go` | Login throttling |
 | `internal/web/handlers.go` | Shared form and error helpers |
 | `internal/web/accounts.go`, `customers.go`, `repairs.go` | Account, customer and repair pages |
-| `internal/web/parts.go`, `attachments.go` | Part, estimate and attachment pages |
+| `internal/web/parts.go`, `attachments.go` | Part and attachment handlers |
 | `internal/web/templates/` | Server-rendered pages and stable selectors |
 | `internal/web/static/` | Embedded CSS and progressive-enhancement JavaScript |
 | `internal/i18n/` | Translation loading, fallback, plurals and catalogs |

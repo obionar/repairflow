@@ -72,8 +72,8 @@ activity write, so an internal error or missing activity row does not prove noth
 ## Contract
 
 - Machine calls use `--json`: success `{ok,command,contract,data}`; command failures include
-  `{ok:false,command,contract,error:{code,message}}` on stderr with empty stdout. Global flag
-  parse errors can be plain text even with `--json`; check the exit status before parsing.
+  `{ok:false,command,contract,error:{code,message}}` on stderr with empty stdout, including global
+  flag parse errors. Check the exit status before parsing.
 - Exit: `0` success; `1` internal; `2` usage/validation/permission; `3` workspace/config/state
   conflict; `4` not found. Codes are stable, messages are not. `doctor` can return a report on stdout
   with exit `3` for unhealthy checks; do not treat every nonzero exit as an error envelope.

@@ -431,9 +431,9 @@ func removeSystemd(o Options, name string) (*Result, error) {
 	if err := systemctl("disable", "--now", unitFile); err != nil {
 		// Never delete a unit that is still running: the process would outlive
 		// its only stop handle and the shop would keep serving an orphan.
-		if active := statusOf(unitFile); active == "active" || active == "activating" || active == "reloading" {
+		if active := statusOf(unitFile); active != "inactive" && active != "failed" {
 			return nil, errs.New(errs.CodeConflict,
-				"refusing to remove %s: the service is %s and did not stop (%v); run: systemctl --user disable --now %s",
+				"refusing to remove %s: service state is %q after disable failed (%v); confirm it is stopped with: systemctl --user is-active %s",
 				unitPath, active, err, unitFile)
 		}
 		res.Warning = joinWarning(res.Warning, "could not disable the unit: "+err.Error())
@@ -463,9 +463,9 @@ func removeOpenRC(o Options, name string) (*Result, error) {
 	}
 	res := &Result{UnitPath: unitPath, Present: false, Active: "unknown"}
 	if err := openrcCommand("rc-service", name, "stop"); err != nil {
-		if state, _ := openrcStatus(name); state == "started" || state == "starting" {
+		if state, _ := openrcStatus(name); state != "stopped" && state != "crashed" && state != "inactive" {
 			return nil, errs.New(errs.CodeConflict,
-				"refusing to remove %s: the service is %s and did not stop (%v); run: %s rc-service %s stop",
+				"refusing to remove %s: service state is %q after stop failed (%v); confirm it is stopped with: %s rc-service %s status",
 				unitPath, state, err, privilegeCommand(), name)
 		}
 		res.Warning = joinWarning(res.Warning, "stop failed: "+err.Error())

@@ -92,6 +92,28 @@ func parseFormID(raw string) int64 {
 	return id
 }
 
+func (s *Server) requireEntryParent(r *http.Request, repairID, entryID int64) error {
+	entry, err := s.svc.GetEntry(r.Context(), entryID)
+	if err != nil {
+		return err
+	}
+	if entry.RepairID != repairID {
+		return errs.New(errs.CodeNotFound, "entry %d does not belong to repair %d", entryID, repairID)
+	}
+	return nil
+}
+
+func (s *Server) requirePartParent(r *http.Request, repairID, partID int64) error {
+	part, err := s.svc.GetRepairPart(r.Context(), partID)
+	if err != nil {
+		return err
+	}
+	if part.RepairID != repairID {
+		return errs.New(errs.CodeNotFound, "part %d does not belong to repair %d", partID, repairID)
+	}
+	return nil
+}
+
 func entryKindValid(kind string) bool {
 	for _, valid := range app.EntryKinds {
 		if kind == valid {

@@ -77,6 +77,16 @@ func TestServiceInstallOpenRCThroughCLI(t *testing.T) {
 		t.Fatalf("status: code=%d %v %s", res.code, data, res.stderr)
 	}
 
+	fakebin := t.TempDir()
+	for name, script := range map[string]string{
+		"rc-service": "#!/bin/sh\ncase \"$2\" in stop) exit 0;; status) echo '* status: stopped'; exit 0;; esac\nexit 1\n",
+		"rc-update":  "#!/bin/sh\nexit 0\n",
+	} {
+		if err := os.WriteFile(filepath.Join(fakebin, name), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", fakebin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	res = run(t, env, "service", "remove", "--init", "openrc", "--json")
 	data, _ = decode(t, res.stdout)["data"].(map[string]any)
 	if res.code != 0 || data["present"] != false {

@@ -32,9 +32,9 @@ func Verify(ctx context.Context, archivePath string) (*Manifest, error) {
 
 // Restore validates the archive and publishes it into destHome, which must
 // not exist or must be an empty directory. Everything is staged under
-// destHome/run/restore-*.part and only renamed into place after full
-// verification, so an interrupted restore leaves a removable staging
-// directory instead of a half-published workspace.
+// destHome/run/restore-*.part and published with no-replace operations after
+// full verification. Publication errors roll back operation-owned files; the
+// verified archive remains the recovery source after a process crash.
 func Restore(ctx context.Context, archivePath, destHome string) (*Manifest, error) {
 	if err := prepareDest(destHome); err != nil {
 		return nil, err
@@ -43,8 +43,12 @@ func Restore(ctx context.Context, archivePath, destHome string) (*Manifest, erro
 	if err != nil {
 		return nil, err
 	}
+	staging := ""
 	cleanup := func() {
-		_ = os.RemoveAll(filepath.Join(destHome, "run"))
+		if staging != "" {
+			_ = os.RemoveAll(staging)
+		}
+		removeEmptyDirs(destHome)
 		if created {
 			// Only remove the root if nothing was published into it.
 			if entries, err := os.ReadDir(destHome); err == nil && len(entries) == 0 {
@@ -53,8 +57,12 @@ func Restore(ctx context.Context, archivePath, destHome string) (*Manifest, erro
 		}
 	}
 
-	staging := filepath.Join(destHome, "run", "restore-staging.part")
-	if err := os.MkdirAll(staging, 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(destHome, "run"), 0o700); err != nil {
+		cleanup()
+		return nil, errs.Wrap(errs.CodeInternal, err, "cannot create restore run directory")
+	}
+	staging, err = os.MkdirTemp(filepath.Join(destHome, "run"), "restore-*.part")
+	if err != nil {
 		cleanup()
 		return nil, errs.Wrap(errs.CodeInternal, err, "cannot create restore staging")
 	}
@@ -67,9 +75,8 @@ func Restore(ctx context.Context, archivePath, destHome string) (*Manifest, erro
 
 	// Publish: move staged content into the final layout.
 	if err := publish(staging, destHome, manifest); err != nil {
-		// Staging is preserved on publish failure for manual recovery.
-		return nil, errs.Wrap(errs.CodeInternal, err,
-			"restore publish failed; staged data kept at %s for recovery", staging)
+		cleanup()
+		return nil, fmt.Errorf("restore publish failed; rollback was attempted and the verified archive is unchanged: %w", err)
 	}
 	_ = os.RemoveAll(staging)
 	return manifest, nil
@@ -208,23 +215,46 @@ func validateDatabaseHandle(ctx context.Context, handle *sql.DB, manifest *Manif
 }
 
 // publish moves verified staged content into the final workspace layout.
-func publish(staging, destHome string, manifest *Manifest) error {
+func publish(staging, destHome string, manifest *Manifest) (err error) {
+	moved := []string{}
+	defer func() {
+		if err == nil {
+			return
+		}
+		for i := len(moved) - 1; i >= 0; i-- {
+			if removeErr := os.Remove(moved[i]); removeErr != nil && !os.IsNotExist(removeErr) {
+				err = fmt.Errorf("%w; rollback could not remove %s: %v", err, moved[i], removeErr)
+			}
+		}
+	}()
+	move := func(src, dst string) error {
+		if err := moveFile(src, dst); err != nil {
+			return err
+		}
+		moved = append(moved, dst)
+		return nil
+	}
 	dirs := []string{"data", "files", "backups", "logs", "cache", "run"}
 	for _, d := range dirs {
 		if err := os.MkdirAll(filepath.Join(destHome, d), 0o700); err != nil {
 			return err
 		}
 	}
-	if err := moveFile(filepath.Join(staging, filepath.FromSlash(dbEntryName)), filepath.Join(destHome, "data", "repairflow.db")); err != nil {
+	if err := move(filepath.Join(staging, filepath.FromSlash(dbEntryName)), filepath.Join(destHome, "data", "repairflow.db")); err != nil {
 		return err
 	}
 	if manifest.Config != nil {
-		if err := moveFile(filepath.Join(staging, filepath.FromSlash(cfgEntryName)), filepath.Join(destHome, "config.toml")); err != nil {
+		if err := move(filepath.Join(staging, filepath.FromSlash(cfgEntryName)), filepath.Join(destHome, "config.toml")); err != nil {
 			return err
 		}
 	}
-	if _, err := os.Stat(filepath.Join(staging, "files", "tickets")); err == nil {
-		if err := os.Rename(filepath.Join(staging, "files", "tickets"), filepath.Join(destHome, "files", "tickets")); err != nil {
+	for _, attachment := range manifest.Attachments {
+		rel := fmt.Sprintf("files/tickets/%d/%s", attachment.TicketID, attachment.StorageName)
+		dst := filepath.Join(destHome, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+			return err
+		}
+		if err := move(filepath.Join(staging, filepath.FromSlash(rel)), dst); err != nil {
 			return err
 		}
 	}
@@ -235,10 +265,25 @@ func moveFile(src, dst string) error {
 	if err := os.Chmod(src, 0o600); err != nil {
 		return err
 	}
-	if err := os.Rename(src, dst); err != nil {
-		return errs.Wrap(errs.CodeInternal, err, "cannot publish %s", dst)
+	if err := publishNoReplace(src, dst); err != nil {
+		return err
 	}
 	return nil
+}
+
+// removeEmptyDirs removes only empty directories, deepest first. Foreign files
+// created during a failed restore therefore remain in place and block removal.
+func removeEmptyDirs(root string) {
+	var dirs []string
+	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err == nil && info.IsDir() && path != root {
+			dirs = append(dirs, path)
+		}
+		return nil
+	})
+	for i := len(dirs) - 1; i >= 0; i-- {
+		_ = os.Remove(dirs[i])
+	}
 }
 
 // ---- archive reading helpers ---------------------------------------------

@@ -31,7 +31,8 @@ To update, run
 `git pull && ./install-repairflow` again: the binary is replaced atomically
 under the same executable lock as signed updates, existing workspaces and configuration are kept,
 and each workspace database migrates automatically on the next command or
-start, from any supported previous version. Restart a running RepairFlow
+start, from any supported previous version. The installer itself runs only `config check` on an
+existing workspace; it does not open or migrate its database. Restart a running RepairFlow
 service separately to pick up the new binary. For a schema-changing upgrade, take and verify a backup
 first and stop the service before the new binary opens the workspace; an executable-only rollback
 does not revert a migrated schema. Binary replacement does not refresh service units or update

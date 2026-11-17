@@ -257,8 +257,8 @@ command to run, and the verified update still counts as applied.
 
 It follows GitHub's `latest`, which excludes prereleases, so it never moves itself onto a release
 candidate line; set `RF_UPDATE_TAG` to pin one explicitly. Before it does anything it refuses an
-unhealthy workspace, an invalid `RF_UPDATE_TRIES`, a candidate already marked failed, a backup
-destination without room, and any layout it cannot verify. Only the default service instance is
+unhealthy workspace, an invalid `RF_UPDATE_TRIES`, a downgrade candidate, a candidate already marked
+failed, a backup destination without room, and any layout it cannot verify. Only the default service instance is
 supported: the effective unit or init script must pin the same binary and `--home` that this run
 uses, otherwise the script refuses and prints manual steps. On systemd it reads the unit systemd
 actually loaded (`systemctl --user show --property=FragmentPath`) and refuses an unreadable unit or
@@ -405,11 +405,15 @@ is still an open audit finding.
 
 ## Uninstall
 
+First disable any `repairflow-autoupdate` cron entry or user timer so removal cannot leave a
+scheduler invoking a deleted executable. Then remove the service and preserve a verified backup:
+
 ```bash
 repairflow service remove
 repairflow backup create --output /absolute/path/final-backup.rfbak
 repairflow backup verify /absolute/path/final-backup.rfbak
 rm ~/.local/bin/repairflow ~/.local/bin/update-github.sh
+rm ~/.local/bin/repairflow-update ~/.local/bin/repairflow-autoupdate
 rm -f ~/.local/bin/repairflow.lock
 ```
 

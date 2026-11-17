@@ -3,6 +3,7 @@ package app_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -313,7 +314,7 @@ func TestDestructiveAttachmentOpsRefuseAmbientTransaction(t *testing.T) {
 		if _, err := svc.Purge(txCtx, "tester", a.ID, true); errs.CodeOf(err) != errs.CodeValidation {
 			t.Fatalf("purge inside ambient transaction = %v, want validation_error", err)
 		}
-		if err := svc.ClearBusinessRecords(txCtx); errs.CodeOf(err) != errs.CodeValidation {
+		if err := svc.ClearBusinessRecords(txCtx, nil); errs.CodeOf(err) != errs.CodeValidation {
 			t.Fatalf("clear inside ambient transaction = %v, want validation_error", err)
 		}
 		return nil
@@ -322,6 +323,22 @@ func TestDestructiveAttachmentOpsRefuseAmbientTransaction(t *testing.T) {
 		t.Fatalf("ambient transaction: %v", err)
 	}
 	assertPurgeRolledBack(t, svc, a.ID, payload)
+}
+
+func TestClearBusinessRecordsValidationPreventsDelete(t *testing.T) {
+	ctx := context.Background()
+	svc, _ := newAttachmentService(t)
+	if _, err := svc.CreateCustomer(ctx, "tester", app.CustomerInput{Name: "Keep me"}); err != nil {
+		t.Fatal(err)
+	}
+	refused := errs.New(errs.CodeConflict, "workspace changed")
+	if err := svc.ClearBusinessRecords(ctx, func(context.Context) error { return refused }); !errors.Is(err, refused) {
+		t.Fatalf("validation error = %v, want %v", err, refused)
+	}
+	customers, _, err := svc.Counts(ctx)
+	if err != nil || customers != 1 {
+		t.Fatalf("validation deleted records: customers=%d err=%v", customers, err)
+	}
 }
 
 func TestClearBusinessRecordsFailurePreservesAttachmentBytes(t *testing.T) {
@@ -349,7 +366,7 @@ func TestClearBusinessRecordsFailurePreservesAttachmentBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := svc.ClearBusinessRecords(ctx); err == nil {
+	if err := svc.ClearBusinessRecords(ctx, nil); err == nil {
 		t.Fatal("clear must fail when a business-table delete fails")
 	}
 	if _, err := svc.GetAttachment(ctx, a.ID); err != nil {

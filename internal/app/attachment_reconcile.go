@@ -38,7 +38,7 @@ func (s *Service) ReconcileAttachments(ctx context.Context) (missing, orphans []
 			return nil, nil, errs.Wrap(errs.CodeInternal, err, "cannot read attachment record")
 		}
 		refs = append(refs, r)
-		known[r.name] = true
+		known[formatRef(r.repair, r.name)] = true
 	}
 	if err := rows.Err(); err != nil {
 		_ = rows.Close()
@@ -73,26 +73,10 @@ func (s *Service) ReconcileAttachments(ctx context.Context) (missing, orphans []
 			missing = append(missing, formatRef(r.repair, r.name)+" (content mismatch)")
 		}
 	}
-	// Orphans: stored files that no live row references.
-	repairRows, err := s.q(ctx).QueryContext(ctx, `SELECT id FROM repairs`)
+	// Orphans include directories left behind by rolled-back repair creation.
+	repairIDs, err := store.RepairIDs()
 	if err != nil {
-		return nil, nil, errs.Wrap(errs.CodeInternal, err, "cannot list repairs")
-	}
-	var repairIDs []int64
-	for repairRows.Next() {
-		var id int64
-		if err := repairRows.Scan(&id); err != nil {
-			_ = repairRows.Close()
-			return nil, nil, errs.Wrap(errs.CodeInternal, err, "cannot read repair id")
-		}
-		repairIDs = append(repairIDs, id)
-	}
-	if err := repairRows.Err(); err != nil {
-		_ = repairRows.Close()
-		return nil, nil, errs.Wrap(errs.CodeInternal, err, "cannot iterate repair ids")
-	}
-	if err := repairRows.Close(); err != nil {
-		return nil, nil, errs.Wrap(errs.CodeInternal, err, "cannot close repair ids")
+		return nil, nil, err
 	}
 	for _, tid := range repairIDs {
 		names, err := store.List(tid)
@@ -100,7 +84,7 @@ func (s *Service) ReconcileAttachments(ctx context.Context) (missing, orphans []
 			return nil, nil, err
 		}
 		for _, n := range names {
-			if !known[n] {
+			if !known[formatRef(tid, n)] {
 				orphans = append(orphans, formatRef(tid, n))
 			}
 		}

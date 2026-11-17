@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"repairflow/internal/errs"
@@ -208,6 +209,29 @@ func (s *Store) Exists(ticketID int64, storageName string) (bool, error) {
 		return false, errs.Wrap(errs.CodeInternal, err, "cannot inspect attachment file")
 	}
 	return true, nil
+}
+
+// RepairIDs returns every positive numeric attachment directory, including
+// directories whose repair row no longer exists after a rolled-back operation.
+func (s *Store) RepairIDs() ([]int64, error) {
+	entries, err := os.ReadDir(filepath.Join(s.home, "files", "tickets"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, errs.Wrap(errs.CodeInternal, err, "cannot list attachment repair directories")
+	}
+	out := []int64{}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		id, err := strconv.ParseInt(entry.Name(), 10, 64)
+		if err == nil && id > 0 {
+			out = append(out, id)
+		}
+	}
+	return out, nil
 }
 
 // List returns the opaque storage names present for one repair.

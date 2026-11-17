@@ -85,6 +85,10 @@ for a in "$@"; do
   if [ "$a" = "--apply" ]; then apply=1; fi
 done
 if [ "$apply" = 0 ]; then
+  if [ -f "$STATE/downgrade" ]; then
+    echo "refusing downgrade" >&2
+    exit 2
+  fi
   if [ -f "$STATE/uptodate" ]; then
     echo "repairflow is up to date"
     exit 0
@@ -653,6 +657,21 @@ func TestAutoupdateRefusesUnparseableConfig(t *testing.T) {
 	}
 	if !strings.Contains(h.messageLog(), "refuse:") {
 		t.Fatalf("refusal was not logged:\n%s\n%s", out, h.messageLog())
+	}
+}
+
+func TestAutoupdateDowngradeIsRefusedBeforeStop(t *testing.T) {
+	h := newAutoHarness(t)
+	h.setupUpdate()
+	h.setupOpenRC()
+	h.set("downgrade", "1")
+	out, err := h.run()
+	if err != nil {
+		t.Fatalf("a refused downgrade must not fail the job: %v\n%s\n%s", err, out, h.callsLog())
+	}
+	h.requireNoMutation(t)
+	if h.has("repairflow stop") {
+		t.Fatalf("service was stopped for a downgrade:\n%s", h.callsLog())
 	}
 }
 

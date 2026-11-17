@@ -3,6 +3,7 @@ package app_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"repairflow/internal/app"
 	"repairflow/internal/errs"
@@ -36,6 +37,17 @@ func TestUserPasswordLifecycle(t *testing.T) {
 	}
 	if _, _, err := svc.Login(ctx, "admin", "new-password-1"); err != nil {
 		t.Fatalf("new password must work: %v", err)
+	}
+}
+
+func TestUnknownLoginPerformsPasswordWork(t *testing.T) {
+	svc := newService(t)
+	started := time.Now()
+	if _, _, err := svc.Login(context.Background(), "missing-user", "wrong-password"); errs.CodeOf(err) != errs.CodeValidation {
+		t.Fatalf("unknown login: %v", err)
+	}
+	if elapsed := time.Since(started); elapsed < 10*time.Millisecond {
+		t.Fatalf("unknown login skipped Argon2 work: %s", elapsed)
 	}
 }
 

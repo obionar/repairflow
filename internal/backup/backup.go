@@ -327,17 +327,15 @@ func encodeManifest(m *Manifest) ([]byte, error) {
 	return body, nil
 }
 
-// publishByRename is the portable fallback for filesystems without an atomic
-// no-replace rename. The check is best effort; Linux normally uses
-// publishNoReplace's renameat2 path.
-func publishByRename(temp, dest string) error {
-	if _, err := os.Lstat(dest); err == nil {
-		return errs.New(errs.CodeConflict, "refusing to overwrite existing %q", dest)
-	} else if !os.IsNotExist(err) {
-		return errs.Wrap(errs.CodeInternal, err, "cannot inspect backup destination")
-	}
-	if err := os.Rename(temp, dest); err != nil {
-		return errs.Wrap(errs.CodeInternal, err, "cannot publish backup")
+// publishByLink is the safe fallback when renameat2 is unavailable. The link
+// either appears atomically or fails; a check followed by rename could overwrite
+// a backup created by another process between those two operations.
+func publishByLink(temp, dest string) error {
+	if err := os.Link(temp, dest); err != nil {
+		if os.IsExist(err) {
+			return errs.New(errs.CodeConflict, "refusing to overwrite existing %q", dest)
+		}
+		return errs.Wrap(errs.CodeInternal, err, "cannot publish backup without overwriting; filesystem supports neither no-replace rename nor hard links")
 	}
 	return nil
 }

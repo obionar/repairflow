@@ -451,6 +451,10 @@ func (s *Server) repairEntryEdit(w http.ResponseWriter, r *http.Request, sess ap
 		s.renderError(w, r, sessView(sess), err, statusOf(err))
 		return
 	}
+	if err := s.requireEntryParent(r, id, eid); err != nil {
+		s.repairFormError(w, r, sess, id, err, func(*repairView) {})
+		return
+	}
 	form := entryForm{Kind: r.FormValue("kind"), Body: r.FormValue("body")}
 	_, err = s.svc.EditRepairEntry(r.Context(), actorOf(sess), eid, &form.Kind, &form.Body)
 	if err != nil {
@@ -472,8 +476,15 @@ func (s *Server) repairEntryEdit(w http.ResponseWriter, r *http.Request, sess ap
 
 func (s *Server) repairEntryDelete(w http.ResponseWriter, r *http.Request, sess app.Session) {
 	s.repairMutation(w, r, sess, func() error {
+		id, err := pathID(r, "id")
+		if err != nil {
+			return err
+		}
 		eid, err := pathID(r, "eid")
 		if err != nil {
+			return err
+		}
+		if err := s.requireEntryParent(r, id, eid); err != nil {
 			return err
 		}
 		_, err = s.svc.DeleteRepairEntry(r.Context(), actorOf(sess), eid)
@@ -483,8 +494,15 @@ func (s *Server) repairEntryDelete(w http.ResponseWriter, r *http.Request, sess 
 
 func (s *Server) repairEntryRestore(w http.ResponseWriter, r *http.Request, sess app.Session) {
 	s.repairMutation(w, r, sess, func() error {
+		id, err := pathID(r, "id")
+		if err != nil {
+			return err
+		}
 		eid, err := pathID(r, "eid")
 		if err != nil {
+			return err
+		}
+		if err := s.requireEntryParent(r, id, eid); err != nil {
 			return err
 		}
 		_, err = s.svc.RestoreRepairEntry(r.Context(), actorOf(sess), eid)

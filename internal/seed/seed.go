@@ -363,29 +363,34 @@ func DemoWithOptions(ctx context.Context, svc *app.Service, opts Options) (Resul
 	return res, nil
 }
 
-// seedDataset seeds the synthetic dataset atomically. It refuses to run when
+// seedDataset seeds the synthetic database atomically. It refuses to run when
 // any business record already exists (the demo must never mix with real data)
 // and is idempotent once the seed marker is present.
 func seedDataset(ctx context.Context, svc *app.Service) (Result, error) {
-	if found, _, err := svc.SeedMarker(ctx, DemoKey); err != nil {
-		return Result{}, err
-	} else if found {
-		return Result{AlreadySeeded: true}, nil
-	}
-	customers, repairs, err := svc.Counts(ctx)
-	if err != nil {
-		return Result{}, err
-	}
-	if customers > 0 || repairs > 0 {
-		return Result{}, errs.New(errs.CodeConflict,
-			"refusing to seed demo data: workspace already holds %d customer(s) and %d repair(s); demo data must stay isolated",
-			customers, repairs)
-	}
-
-	res := Result{Seeded: true}
+	res := Result{}
 	entryIDs := map[[2]int]int64{} // {repair,entry} -> created entry id
 	repairIDs := make([]int64, len(demoData.repairs))
-	err = svc.InTx(ctx, func(ctx context.Context) error {
+	err := svc.InTx(ctx, func(ctx context.Context) error {
+		// The guard belongs to this write transaction: another process may seed
+		// or add records after any check made before BEGIN IMMEDIATE.
+		found, _, err := svc.SeedMarker(ctx, DemoKey)
+		if err != nil {
+			return err
+		}
+		if found {
+			res = Result{AlreadySeeded: true}
+			return nil
+		}
+		customers, repairs, err := svc.Counts(ctx)
+		if err != nil {
+			return err
+		}
+		if customers > 0 || repairs > 0 {
+			return errs.New(errs.CodeConflict,
+				"refusing to seed demo data: workspace already holds %d customer(s) and %d repair(s); demo data must stay isolated",
+				customers, repairs)
+		}
+		res.Seeded = true
 		ids := make([]int64, len(demoData.customers))
 		for i, c := range demoData.customers {
 			created, err := svc.CreateCustomer(ctx, DemoActor, app.CustomerInput{

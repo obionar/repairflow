@@ -2,8 +2,8 @@
 //
 // The installer must build from the checkout and replace the installed binary
 // atomically (never leaving a .new file behind), report the previous version on
-// update, and validate an existing workspace config with the new binary via an
-// idempotent `init` without touching fresh installs or user data.
+// update, and validate an existing workspace config without opening or migrating
+// its database.
 package scripts_test
 
 import (
@@ -193,7 +193,10 @@ func TestInstallReplacesBinaryAndKeepsWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(callsText), "init") {
-		t.Fatalf("existing workspace must be validated via init: %q", callsText)
+	if !strings.Contains(string(callsText), "config check") {
+		t.Fatalf("existing workspace must be validated without migration: %q", callsText)
+	}
+	if strings.Contains(string(callsText), "init") {
+		t.Fatalf("installation must not open or migrate the workspace: %q", callsText)
 	}
 }

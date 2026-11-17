@@ -171,9 +171,9 @@ Workspace:
                      stage, parts, estimates, files); --demo-user also creates that demo
                      admin using REPAIRFLOW_NEW_PASSWORD
   config check       Validate the workspace configuration
-  status             Workspace summary (read-only)
+  status             Workspace summary (no business-record edits)
   doctor             Health diagnostics: workspace, schema, integrity, records,
-                     demo marker and attachment bytes (read-only)
+                     demo marker and attachment bytes (may resolve pending deletes)
   cleanup            Remove stale staging files and cache (never user data)
   serve              Run the embedded web interface (config web.host/web.port)
 
@@ -242,6 +242,7 @@ Service and offline updates:
                                          # --name selects a non-default instance
   update check --manifest M --signature S
   update apply --file ARTIFACT --manifest M --signature S --confirm
+  update verify --file FILE --signature SIG
   update keygen --out DIR | update sign --key K --manifest M --out SIG
 
 Demo:

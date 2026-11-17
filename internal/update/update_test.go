@@ -311,6 +311,14 @@ func TestKeygenSignVerifyRoundtrip(t *testing.T) {
 	}
 }
 
+func TestCheckRefusesDowngradeBeforeApply(t *testing.T) {
+	dir := t.TempDir()
+	r := makeRelease(t, dir, "0.9.0", runtime_GOOS, runtime_GOARCH, "0.9.0")
+	if _, err := update.Check(r.manifest, r.sig, r.pub, "1.0.0", runtime_GOOS, runtime_GOARCH); errs.CodeOf(err) != errs.CodeValidation {
+		t.Fatalf("check must refuse a downgrade before service changes: %v", err)
+	}
+}
+
 func TestCompareVersions(t *testing.T) {
 	cases := []struct {
 		a, b string

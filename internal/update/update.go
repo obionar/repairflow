@@ -119,11 +119,15 @@ func Check(manifestBytes, sig []byte, pub ed25519.PublicKey, currentVersion, goo
 	if err != nil {
 		return nil, err
 	}
+	cmp := CompareVersions(m.Version, currentVersion)
+	if cmp < 0 {
+		return nil, errs.New(errs.CodeValidation,
+			"refusing downgrade %s -> %s; recovery uses the preserved previous binary", currentVersion, m.Version)
+	}
 	res := &CheckResult{
 		CurrentVersion: currentVersion, NewVersion: m.Version,
-		Channel: m.Channel, Artifact: *artifact,
+		Channel: m.Channel, Artifact: *artifact, UpToDate: cmp == 0,
 	}
-	res.UpToDate = CompareVersions(m.Version, currentVersion) == 0
 	return res, nil
 }
 

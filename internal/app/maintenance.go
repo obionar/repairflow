@@ -47,11 +47,12 @@ func (s *Service) BusinessCounts(ctx context.Context) (customers, repairs, entri
 // bytes as one recoverable operation. This is the destructive core of the
 // verified demo-reset path and must only be called
 // behind a provenance guard; users and sessions are intentionally preserved.
+// validate runs inside the same write transaction before any deletion.
 //
 // Filesystem deletes are staged as hard-link recovery entries before the SQL
 // transaction. A metadata failure restores every original byte; only after a
 // successful commit are the recovery links finalized.
-func (s *Service) ClearBusinessRecords(ctx context.Context) error {
+func (s *Service) ClearBusinessRecords(ctx context.Context, validate func(context.Context) error) error {
 	if inAmbientTx(ctx) {
 		return errs.New(errs.CodeValidation,
 			"demo reset/clear must own its transaction; do not call it inside Service.InTx")
@@ -70,6 +71,11 @@ func (s *Service) ClearBusinessRecords(ctx context.Context) error {
 	}
 	pending := []files.PendingDelete{}
 	err = s.InTx(ctx, func(ctx context.Context) error {
+		if validate != nil {
+			if err := validate(ctx); err != nil {
+				return err
+			}
+		}
 		rows, err := s.q(ctx).QueryContext(ctx,
 			`SELECT repair_id, storage_name FROM attachments WHERE storage_name != ''`)
 		if err != nil {

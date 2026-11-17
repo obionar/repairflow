@@ -140,8 +140,10 @@ repairflow serve
 Open <http://127.0.0.1:8091/login>. The default workspace is `~/.repairflow`; use `--home PATH` or
 `REPAIRFLOW_HOME` to choose another location. `init` creates the configuration and initializes or
 migrates the SQLite database without creating records or accounts, so `doctor` is healthy directly
-afterwards. See [the installation guide](docs/INSTALL.md) for release verification, roles and
-troubleshooting.
+afterwards. Installing a new binary from source only validates existing configuration; it does not
+open or migrate the database. For upgrades, take a verified backup and stop old writers first, as
+[the deployment guide](docs/DEPLOY.md#upgrade) describes. See [the installation guide](docs/INSTALL.md)
+for release verification, roles and troubleshooting.
 
 ## Documentation
 
