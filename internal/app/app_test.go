@@ -617,7 +617,7 @@ func TestEntryEditSoftDeleteRecover(t *testing.T) {
 	if edited.Body != "Corrected text" {
 		t.Fatalf("edited: %+v", edited)
 	}
-	revs, err := svc.ListRepairEntryRevisions(ctx, tk.ID)
+	revs, err := svc.ListRepairEntryRevisions(ctx, tk.ID, nil)
 	if err != nil || len(revs[e.ID]) != 1 {
 		t.Fatalf("revisions: %+v %v", revs, err)
 	}
@@ -656,7 +656,7 @@ func TestEntryEditSoftDeleteRecover(t *testing.T) {
 	}
 
 	// History never physically deleted: revision rows survive everything.
-	revs, _ = svc.ListRepairEntryRevisions(ctx, tk.ID)
+	revs, _ = svc.ListRepairEntryRevisions(ctx, tk.ID, nil)
 	if len(revs[e.ID]) != 1 {
 		t.Fatalf("revisions lost: %+v", revs)
 	}

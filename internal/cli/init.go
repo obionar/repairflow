@@ -4,9 +4,13 @@ import (
 	"context"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
+	"repairflow/internal/app"
+	"repairflow/internal/backup"
 	"repairflow/internal/config"
+	"repairflow/internal/db"
 	"repairflow/internal/errs"
 	"repairflow/internal/i18n"
 	"repairflow/internal/seed"
@@ -25,6 +29,85 @@ type initReport struct {
 	*workspace.InitResult
 	Ignored          []string `json:"ignored,omitempty"`
 	existingLanguage string
+}
+
+// openForInit initializes a fresh database, or migrates an outdated one only
+// after verifying the operator-supplied pre-migration backup. Migration holds
+// the exclusive workspace lock; ordinary opens use a shared lock and refuse an
+// outdated schema.
+func openForInit(ctx context.Context, opts options, home, backupPath string) (*app.Service, func(), bool, error) {
+	dbPath := db.Path(home)
+	_, statErr := os.Stat(dbPath)
+	fresh := os.IsNotExist(statErr)
+
+	current, err := peekSchema(ctx, home)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	latest := db.LatestVersion()
+	if current > latest {
+		return nil, nil, false, errs.New(errs.CodeConfigVersion,
+			"database schema version %d is newer than the supported version %d; upgrade RepairFlow first", current, latest)
+	}
+	if current == latest {
+		svc, closeDB, err := openService(ctx, home, opts.logger)
+		return svc, closeDB, backupPath != "", err
+	}
+	ignoredBackup := fresh && backupPath != ""
+	if current != 0 {
+		if backupPath == "" {
+			return nil, nil, false, schemaGateError(home, current, latest)
+		}
+		if !filepath.IsAbs(backupPath) {
+			return nil, nil, false, errs.New(errs.CodeValidation,
+				"--backup must be an absolute path to a verified pre-migration backup")
+		}
+	}
+
+	unlock, err := workspace.Lock(ctx, home, true)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	// Recheck under the exclusive lock: another process may have migrated or
+	// changed the schema while this command waited.
+	current, err = peekSchema(ctx, home)
+	if err != nil {
+		unlock()
+		return nil, nil, false, err
+	}
+	if current == latest {
+		unlock()
+		svc, closeDB, err := openService(ctx, home, opts.logger)
+		return svc, closeDB, ignoredBackup, err
+	}
+	if current != 0 {
+		manifest, err := backup.Verify(ctx, backupPath)
+		if err != nil {
+			unlock()
+			return nil, nil, false, errs.Wrap(errs.CodeConflict, err,
+				"pre-migration backup did not verify; migration was not started")
+		}
+		if manifest.SchemaVersion != current {
+			unlock()
+			return nil, nil, false, errs.New(errs.CodeConflict,
+				"pre-migration backup schema version %d does not match workspace version %d", manifest.SchemaVersion, current)
+		}
+	}
+	svc, closeDB, err := openServiceDatabase(ctx, home, opts.logger, true)
+	if err != nil {
+		unlock()
+		return nil, nil, false, err
+	}
+	return svc, func() { closeDB(); unlock() }, ignoredBackup, nil
+}
+
+func peekSchema(ctx context.Context, home string) (int, error) {
+	handle, err := db.Open(ctx, db.Path(home))
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = handle.Close() }()
+	return db.CurrentVersion(ctx, handle)
 }
 
 // workspaceInitWith initializes the workspace and applies the chosen web port
@@ -59,7 +142,7 @@ func workspaceInitWith(home string, port int, language string) (*workspace.InitR
 }
 
 func runInit(ctx context.Context, stdin io.Reader, stdout io.Writer, opts options, args []string, getenv Env) (any, error) {
-	p, err := parseArgs(args, []string{"demo-user", "language"}, []string{"demo", "interactive"})
+	p, err := parseArgs(args, []string{"demo-user", "language", "backup"}, []string{"demo", "interactive"})
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +158,7 @@ func runInit(ctx context.Context, stdin io.Reader, stdout io.Writer, opts option
 		// seeds demo data; the plain path must initialize it too.
 		if result, ok := data.(map[string]any); ok {
 			if res, ok := result["init"].(*workspace.InitResult); ok {
-				_, closeDB, err := openService(ctx, res.Home, opts.logger)
+				_, closeDB, _, err := openForInit(ctx, opts, res.Home, "")
 				if err != nil {
 					return nil, err
 				}
@@ -126,14 +209,15 @@ func runInit(ctx context.Context, stdin io.Reader, stdout io.Writer, opts option
 		report.Ignored = []string{"language"}
 		report.existingLanguage = cfg.UI.Language
 	}
-	// init is the explicit database-initializing command: open the shared
-	// service so migrations run now and doctor is healthy immediately. No
-	// records, users or demo data are created here.
-	svc, closeDB, err := openService(ctx, home, opts.logger)
+	// init is the explicit database-initializing and migration command.
+	svc, closeDB, ignoredBackup, err := openForInit(ctx, opts, home, p.get("backup"))
 	if err != nil {
 		return nil, err
 	}
 	defer closeDB()
+	if ignoredBackup {
+		report.Ignored = append(report.Ignored, "backup")
+	}
 	if !p.flag("demo") {
 		return report, nil
 	}

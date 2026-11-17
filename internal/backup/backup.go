@@ -42,6 +42,7 @@ import (
 	"repairflow/internal/db"
 	"repairflow/internal/errs"
 	"repairflow/internal/files"
+	"repairflow/internal/workspace"
 )
 
 // FormatVersion is the backup archive format version.
@@ -109,7 +110,12 @@ func Create(ctx context.Context, home, destPath, actor string) (*Result, error) 
 	if err := config.AssertSafeWorkspaceRoot(home); err != nil {
 		return nil, err
 	}
-	destPath, err := validateDest(home, destPath)
+	unlock, err := workspace.Lock(ctx, home, false)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	destPath, err = validateDest(home, destPath)
 	if err != nil {
 		return nil, err
 	}

@@ -46,8 +46,8 @@ SHA256SUMS
 SHA256SUMS.sig
 ```
 
-Each archive contains exactly `repairflow`, `LICENSE`, `manifest.json`, `manifest.sig`,
-`update-github.sh`, `repairflow-update` and `repairflow-autoupdate`. `SHA256SUMS` covers both
+Each archive contains exactly `repairflow`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, `manifest.json`,
+`manifest.sig`, `update-github.sh`, `repairflow-update` and `repairflow-autoupdate`. `SHA256SUMS` covers both
 archives and is signed (`SHA256SUMS.sig`), because the manifest covers only the binaries; verify it
 before extracting so the helper scripts and `LICENSE` are authenticated too. Do not upload loose
 binaries, docs, manifests or demo scripts as separate release assets.
@@ -76,7 +76,7 @@ BIN="$BIN_DIR/repairflow"
 "$BIN" version
 ```
 
-Compare version AND commit with the approved artifact. Keep `LICENSE`, `manifest.json` and
+Compare version AND commit with the approved artifact. Keep `LICENSE`, `THIRD_PARTY_NOTICES.md`, `manifest.json` and
 `manifest.sig` or the complete archive. For source installation, review `$REPO/install-repairflow`
 before invoking it: its default is `$HOME/.local/bin/repairflow`, with `REPAIRFLOW_PREFIX` selecting
 another prefix. It builds, then installs under the executable lock and runs `config check` on an
@@ -147,9 +147,10 @@ representative record/attachment readbacks before relying on it. Keep an access-
 separate storage: archives contain records and password hashes and are not encrypted. Local
 `locales/` overrides are excluded, so preserve them separately if needed.
 
-Before an upgrade, verify that backup, inspect migration compatibility and stop the selected writer
-before the new binary opens its workspace. Do not assume prerelease migration compatibility or that
-`<exe>.prev` alone can undo a schema change. Use the exact published tag, including any `v` prefix;
+Before an upgrade, verify that backup and stop the selected writer. Migrate explicitly with
+`"$BIN" init --backup /ABS/pre-upgrade.rfbak --home "$WS"`; ordinary commands and `serve` refuse an
+outdated schema. Do not assume prerelease migration compatibility or that `<exe>.prev` alone can undo
+a schema change. Use the exact published tag, including any `v` prefix;
 the following `TAG` is a placeholder to set from the approved release, not a latest-version claim:
 
 ```bash
@@ -158,7 +159,8 @@ the following `TAG` is a placeholder to set from the approved release, not a lat
 ```
 
 The helper downloads and verifies as the operator, may escalate only local replacement for a safe
-root-owned executable, and leaves restart separate. Pass only a trusted installed `BIN`. The
+root-owned executable, and leaves restart separate. `repairflow-update` without a tag checks the
+latest stable release; `update-github.sh` is a compatibility wrapper around the same implementation. Pass only a trusted installed `BIN`. The
 archive also ships `repairflow-update` and `repairflow-autoupdate`; consult their matching source
 and `docs/DEPLOY.md` before using them. Do not configure unattended activation without approval.
 
@@ -186,9 +188,11 @@ Only root-owned replacement needs `sudo`/`doas`. Never disable signature/hash/si
 checks. Unsigned builds cannot use signed apply; any manual replacement needs its own approved
 backup, stopped-writer and rollback procedure. Keep `<exe>.lock`; verified apply is Linux-only.
 
-Restart the selected supervisor, re-pin its unit if the binary path changed, open a domain command
-(e.g. `"$BIN" customer list --per-page 1 --home "$WS"`) to apply pending migrations, then read back
-version/commit, `doctor`, record counts, the unit's executable/home and an authenticated web page.
+Restart the selected supervisor and re-pin its unit if the binary path changed. If the schema is
+outdated, migrate explicitly with `"$BIN" init --backup /ABS/pre-upgrade.rfbak --home "$WS"` after
+the verified backup and with the service stopped; otherwise a domain command or `serve` refuses it.
+Then read back version/commit, `doctor`, record counts, the unit's executable/home and an
+authenticated web page.
 Report any unverified step. A successful binary swap alone does not prove the running service updated.
 
 ## Limits

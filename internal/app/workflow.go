@@ -172,15 +172,23 @@ func (s *Service) setEntryDeleted(ctx context.Context, actor string, entryID int
 	return s.getEntry(ctx, entryID)
 }
 
-// ListRepairEntryRevisions returns the immutable edit history of every entry on
-// one repair, keyed by entry id. One query for the page keeps a long history
-// from turning the repair view into a query per entry.
-func (s *Service) ListRepairEntryRevisions(ctx context.Context, repairID int64) (map[int64][]EntryRevision, error) {
-	rows, err := s.q(ctx).QueryContext(ctx,
-		`SELECT r.id, r.entry_id, r.actor, r.prev_kind, r.prev_body, r.prev_created_at, r.created_at
+// ListRepairEntryRevisions returns immutable edit history keyed by entry ID.
+// A non-nil entryIDs limits the query to the visible page; nil returns all.
+func (s *Service) ListRepairEntryRevisions(ctx context.Context, repairID int64, entryIDs []int64) (map[int64][]EntryRevision, error) {
+	if entryIDs != nil && len(entryIDs) == 0 {
+		return map[int64][]EntryRevision{}, nil
+	}
+	query := `SELECT r.id, r.entry_id, r.actor, r.prev_kind, r.prev_body, r.prev_created_at, r.created_at
 		 FROM repair_entry_revisions r
 		 JOIN repair_entries e ON e.id = r.entry_id
-		 WHERE e.repair_id = ? ORDER BY r.entry_id ASC, r.id ASC`, repairID)
+		 WHERE e.repair_id = ?`
+	args := []any{repairID}
+	if entryIDs != nil {
+		marks, idArgs := idInClause(entryIDs)
+		query += " AND e.id IN (" + marks + ")"
+		args = append(args, idArgs...)
+	}
+	rows, err := s.q(ctx).QueryContext(ctx, query+` ORDER BY r.entry_id ASC, r.id ASC`, args...)
 	if err != nil {
 		return nil, errs.Wrap(errs.CodeInternal, err, "cannot read entry revisions")
 	}

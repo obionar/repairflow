@@ -110,7 +110,7 @@ func runInitWizard(ctx context.Context, in io.Reader, out io.Writer, opts option
 	result := map[string]any{"init": res}
 
 	if a.createUser || a.seedDemo {
-		svc, closeDB, err := openService(ctx, home, opts.logger)
+		svc, closeDB, _, err := openForInit(ctx, opts, home, "")
 		if err != nil {
 			return nil, err
 		}

@@ -52,7 +52,7 @@ automated tests and demos; on a non-loopback listener it additionally requires t
 ## Workspace, diagnostics and demo
 
 ```text
-init [--demo [--demo-user NAME]] [--language CODE]
+init [--demo [--demo-user NAME]] [--language CODE] [--backup ARCHIVE]
 init --interactive
 config check
 status
@@ -63,12 +63,18 @@ seed demo [--demo-user NAME]
 demo reset --confirm
 ```
 
-`init` creates owner-only directories, writes configuration only when absent, and initializes or
-migrates the SQLite database to the current schema. It creates no records or accounts, so a fresh
-`init` followed by `doctor` is healthy. Re-running `init` preserves existing configuration, records
-and accounts; newer schemas are still refused. `--language` is applied only when `init` writes a new
-config: on an existing workspace it is ignored, JSON reports `ignored:["language"]` when supplied,
-and human output says the existing language was kept.
+`init` creates owner-only directories, writes configuration only when absent, and initializes the
+SQLite database. It creates no records or accounts, so a fresh `init` followed by `doctor` is
+healthy. Re-running `init` preserves existing configuration, records and accounts; newer schemas are
+still refused. `--language` is applied only when `init` writes a new config: on an existing workspace
+it is ignored, JSON reports `ignored:["language"]` when supplied, and human output says the existing
+language was kept.
+
+An outdated schema is refused by ordinary commands and `serve`. Migration is explicit: create and
+verify a pre-migration backup, stop the service and other writers, then run
+`init --backup ABSOLUTE_PATH`. The archive must verify and its schema version must match the
+workspace's current version. Migration holds an exclusive workspace lock; ordinary opens hold a
+shared lock. A supplied `--backup` is ignored with `ignored:["backup"]` when no migration is needed.
 
 `doctor` does not migrate or modify business records: it reports a missing or outdated schema, and
 checks workspace, database integrity, records, demo marker and the stored attachment bytes (size and
@@ -277,7 +283,8 @@ A staged (unprivileged) install reports the staged path and the exact install co
 claims the service is running.
 
 Updates use local files only and require Ed25519 signature and SHA-256 verification. The optional
-`scripts/update-github.sh` downloads one exact public GitHub release archive into temporary storage,
+`scripts/repairflow-update` downloads the latest stable or one exact public GitHub release archive
+into temporary storage; `scripts/update-github.sh` is its compatibility wrapper. The helper
 rejects unsafe archive paths, extracts the signed manifest and binary, then invokes these same local
 checks; it does not add an API, background polling or automatic restart. Automatic `sudo`/`doas`
 refuses symlink executables and requires root ownership and no group/world write permission for

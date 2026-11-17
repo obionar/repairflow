@@ -233,19 +233,21 @@ Always create and verify a backup first.
 
 ### One command, signed
 
-The release archive ships two small POSIX scripts next to the binary. `repairflow-update` downloads
-one exact tag and hands it to the installed binary, which verifies the signature, hash and platform
-and performs the locked swap — no network code lives in the application:
+The release archive ships two entry points to one POSIX helper. `repairflow-update` resolves GitHub's
+latest stable release when no tag is supplied, or downloads one exact tag, and hands it to the
+installed binary, which verifies the signature, hash and platform and performs the locked swap—no
+network code lives in the application:
 
 ```bash
-repairflow-update v0.2.0            # check only: download and verify, change nothing
-repairflow-update v0.2.0 --apply    # replace the binary, keep <exe>.prev
-repairflow-update v0.2.0 --apply --restart
+repairflow-update                   # check the latest stable release; change nothing
+repairflow-update --apply           # replace the binary, keep <exe>.prev
+repairflow-update --apply --restart # replace it and restart the default service
+repairflow-update v0.2.0-rc6        # check an exact prerelease instead
 ```
 
 With the default `~/.local/bin` installation none of these need privilege. `--restart` uses
-`systemctl --user` and falls back to `doas`/`sudo rc-service`; when neither is possible it prints the
-command to run, and the verified update still counts as applied.
+`systemctl --user` or, on a host without systemctl, `doas`/`sudo rc-service`. A failed or unavailable
+restart produces a nonzero status and a manual command; the verified binary replacement remains applied.
 
 ### Unattended updates
 
@@ -275,7 +277,8 @@ The run is fail-closed and has no automatic rollback:
    only a definite connection refusal counts as free. A timeout or other transport error is
    ambiguous and also refuses the swap. A listener it did not start is left running, never killed.
 3. It creates a verified backup in a fresh `mktemp` directory under `$HOME/backups` (outside the
-   workspace), applies the verified candidate and starts the same service. The free-space check
+   workspace), applies the verified candidate, runs the explicit `init --backup` migration gate,
+   and starts the same service. The free-space check
    runs against that backup filesystem, not the workspace parent, and the unique backup directory
    is created before the stop.
 4. It reports success only when the configured `/login` answers, `/about` shows exactly the expected
@@ -318,22 +321,23 @@ RandomizedDelaySec=15m
 Persistent=true
 ```
 
-### Signed GitHub update (update-github.sh)
+### Signed GitHub update (compatibility name)
 
-After a verified backup, `update-github.sh` downloads the installable archive for the exact release
+`update-github.sh` is a compatibility wrapper around `repairflow-update`; both use the same signed
+download and replacement path. After a verified backup, the helper can download the installable archive for the exact release
 tag from the public `obionar/repairflow` repository. The tag is exact because GitHub `latest` excludes
 prereleases: a prerelease such as `v0.2.0-rc1` must be named explicitly. It selects the current Linux
 architecture, extracts the signed manifest and binary, verifies the signature plus artifact
 SHA-256/size, and does not change the installation by default:
 
 ```bash
-./update-github.sh --tag X.Y.Z --binary ~/.local/bin/repairflow
+./update-github.sh --tag vX.Y.Z --binary ~/.local/bin/repairflow
 ```
 
 Apply only the reviewed candidate:
 
 ```bash
-./update-github.sh --tag X.Y.Z --binary ~/.local/bin/repairflow --apply
+./update-github.sh --tag vX.Y.Z --binary ~/.local/bin/repairflow --apply
 ```
 
 The script performs download and signature verification as the operator. With the default
@@ -397,11 +401,12 @@ repairflow version
 repairflow doctor
 ```
 
-Schema migrations run forward-only when the workspace opens; a newer workspace is refused rather
-than downgraded. Take and verify a backup before changing binaries, stop the old service before the
-new binary opens the workspace, and remember that reverting the executable alone does not revert a
-migrated schema: recover with the matching pre-upgrade workspace backup. A coordinated upgrade gate
-is still an open audit finding.
+Schema migrations are forward-only and explicit. A newer workspace is refused rather than
+downgraded, and ordinary commands or a new service refuse an outdated schema. Take and verify a
+backup, stop the old service, then run `repairflow init --backup /absolute/pre-upgrade.rfbak` with
+the new binary. Migration holds an exclusive workspace lock; normal commands hold a shared lock.
+Reverting the executable alone does not revert a migrated schema: recover with the matching
+pre-upgrade workspace backup.
 
 ## Uninstall
 

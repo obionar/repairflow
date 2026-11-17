@@ -108,7 +108,7 @@ const (
 )
 
 var commandUsage = map[string]string{
-	"init":            "repairflow init [--demo [--demo-user USERNAME]] [--language CODE] | init --interactive",
+	"init":            "repairflow init [--demo [--demo-user USERNAME]] [--language CODE] [--backup ARCHIVE] | init --interactive",
 	"config check":    "repairflow config check",
 	"status":          "repairflow status",
 	"doctor":          "repairflow doctor",
@@ -165,11 +165,13 @@ Usage:
   repairflow [--home PATH] [--json] [--debug] <command> [arguments]
 
 Workspace:
-  init [--demo [--demo-user USERNAME]] [--language CODE] | init --interactive
-                     Initialize a workspace (idempotent, owner-only). --demo
+  init [--demo [--demo-user USERNAME]] [--language CODE] [--backup ARCHIVE]
+                     Initialize, or migrate an outdated schema after verifying
+                     the absolute pre-migration backup ARCHIVE. --demo
                      seeds a full synthetic shop (customers, repairs in every
                      stage, parts, estimates, files); --demo-user also creates that demo
                      admin using REPAIRFLOW_NEW_PASSWORD
+  init --interactive  Prompt for workspace, account, port, language and demo data
   config check       Validate the workspace configuration
   status             Workspace summary (no business-record edits)
   doctor             Health diagnostics: workspace, schema, integrity, records,

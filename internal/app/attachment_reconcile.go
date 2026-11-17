@@ -165,11 +165,20 @@ func scanAttachmentRow(rows interface {
 
 // repairAttachmentEntryIDs reads every attachment→entry link of one repair in a
 // single query: the gallery used to run one query per attachment.
-func (s *Service) repairAttachmentEntryIDs(ctx context.Context, repairID int64) (map[int64][]int64, error) {
-	rows, err := s.q(ctx).QueryContext(ctx,
-		`SELECT l.attachment_id, l.entry_id FROM attachment_links l
+func (s *Service) repairAttachmentEntryIDs(ctx context.Context, repairID int64, attachmentIDs []int64) (map[int64][]int64, error) {
+	if attachmentIDs != nil && len(attachmentIDs) == 0 {
+		return map[int64][]int64{}, nil
+	}
+	query := `SELECT l.attachment_id, l.entry_id FROM attachment_links l
 		 JOIN attachments a ON a.id = l.attachment_id
-		 WHERE a.repair_id = ? ORDER BY l.attachment_id ASC, l.entry_id ASC`, repairID)
+		 WHERE a.repair_id = ?`
+	args := []any{repairID}
+	if attachmentIDs != nil {
+		marks, idArgs := idInClause(attachmentIDs)
+		query += " AND a.id IN (" + marks + ")"
+		args = append(args, idArgs...)
+	}
+	rows, err := s.q(ctx).QueryContext(ctx, query+` ORDER BY l.attachment_id ASC, l.entry_id ASC`, args...)
 	if err != nil {
 		return nil, errs.Wrap(errs.CodeInternal, err, "cannot list attachment links")
 	}

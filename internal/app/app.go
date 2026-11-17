@@ -237,3 +237,12 @@ func inAmbientTx(ctx context.Context) bool {
 	_, ok := ctx.Value(txKey{}).(*sql.Tx)
 	return ok
 }
+
+func idInClause(ids []int64) (string, []any) {
+	marks := make([]string, len(ids))
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		marks[i], args[i] = "?", id
+	}
+	return strings.Join(marks, ","), args
+}

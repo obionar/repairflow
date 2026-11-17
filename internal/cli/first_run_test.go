@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -19,6 +21,7 @@ import (
 
 	"repairflow/internal/config"
 	"repairflow/internal/db"
+	"repairflow/internal/workspace"
 )
 
 // TestInitInitializesDatabaseForDoctor pins the first-run contract: a plain
@@ -86,6 +89,80 @@ func TestInitRerunPreservesDataAndConfig(t *testing.T) {
 	}
 	if doc := run(t, env, "doctor", "--home", home, "--json"); doc.code != 0 {
 		t.Fatalf("doctor after repeat init exit %d: %s", doc.code, doc.stderr)
+	}
+}
+
+// TestOutdatedSchemaRequiresVerifiedBackup pins the migration gate: ordinary
+// commands refuse an older schema, and init migrates only with a matching
+// verified pre-migration archive.
+func TestOutdatedSchemaRequiresVerifiedBackup(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "ws")
+	if res := run(t, nil, "init", "--home", home, "--json"); res.code != 0 {
+		t.Fatalf("init: %s", res.stderr)
+	}
+	ctx := context.Background()
+	handle, err := db.Open(ctx, db.Path(home))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := handle.ExecContext(ctx, `DROP TABLE label_printer`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := handle.ExecContext(ctx, `DELETE FROM schema_migrations WHERE version = ?`, db.LatestVersion()); err != nil {
+		t.Fatal(err)
+	}
+	if err := handle.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	res := run(t, nil, "customer", "list", "--home", home, "--json")
+	if res.code != 3 || !strings.Contains(res.stderr, "init --backup") {
+		t.Fatalf("outdated schema must refuse with the migration remedy: code=%d stderr=%s", res.code, res.stderr)
+	}
+	handle, err = db.Open(ctx, db.Path(home))
+	if err != nil {
+		t.Fatal(err)
+	}
+	version, err := db.CurrentVersion(ctx, handle)
+	if err != nil || version != db.LatestVersion()-1 {
+		t.Fatalf("ordinary command migrated the schema: version=%d err=%v", version, err)
+	}
+	_ = handle.Close()
+
+	backupPath := filepath.Join(t.TempDir(), "pre-migration.rfbak")
+	if res := run(t, nil, "backup", "create", "--output", backupPath, "--home", home, "--json"); res.code != 0 {
+		t.Fatalf("pre-migration backup: %s", res.stderr)
+	}
+	if res := run(t, nil, "init", "--backup", backupPath, "--home", home, "--json"); res.code != 0 {
+		t.Fatalf("gated init: %s", res.stderr)
+	}
+	if res := run(t, nil, "customer", "list", "--home", home, "--json"); res.code != 0 {
+		t.Fatalf("command after migration: %s", res.stderr)
+	}
+	if res := run(t, nil, "doctor", "--home", home, "--json"); res.code != 0 {
+		t.Fatalf("doctor after migration: %s", res.stderr)
+	}
+}
+
+func TestMigrationWaitsForExclusiveWorkspaceLock(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "ws")
+	if res := run(t, nil, "init", "--home", home, "--json"); res.code != 0 {
+		t.Fatalf("init: %s", res.stderr)
+	}
+	ctx := context.Background()
+	unlock, err := workspace.Lock(ctx, home, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	waitCtx, cancel := context.WithTimeout(ctx, 75*time.Millisecond)
+	defer cancel()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	if _, closeDB, err := openService(waitCtx, home, logger); err == nil {
+		closeDB()
+		t.Fatal("shared open must wait while the exclusive migration lock is held")
+	} else if got := err.Error(); !strings.Contains(got, "workspace is busy") {
+		t.Fatalf("unexpected lock refusal: %v", err)
 	}
 }
 

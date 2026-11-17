@@ -62,7 +62,7 @@ before storing sensitive customer data.
   into the build (`-X repairflow/internal/buildinfo.SourceURL=...`). Operators who distribute a
   modified build must point that URL at the Corresponding Source of their version.
 - The application makes no outbound network requests during ordinary use. The optional
-  `scripts/update-github.sh` accesses GitHub only when the operator invokes it, extracts only the
+  `scripts/repairflow-update` (or its `update-github.sh` wrapper) accesses GitHub only when invoked, extracts only the
   expected files from the platform archive, and still requires the installed binary to verify the
   signed manifest and hash before applying an update. When it needs privilege for the local
   replacement, automatic escalation requires a regular, non-symlink root-owned binary and

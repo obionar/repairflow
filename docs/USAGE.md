@@ -27,8 +27,9 @@ Reopening `repaired` or `no_repair` work is explicit and audited. The dashboard 
 awaiting-pickup queues, including repairs without a customer; archived records do not appear in
 those queues.
 
-Rejected entry corrections and pickup submissions keep the submitted fields on the repair page so
-you can fix and retry them. If an entry was deleted meanwhile, its rejected correction is available
+Repair log, activity, parts and gallery sections use bounded pages with previous/next links; older
+records remain available without JavaScript. Rejected entry corrections and pickup submissions keep
+the submitted fields on the repair page so you can fix and retry them. If an entry was deleted meanwhile, its rejected correction is available
 as read-only text under deleted entries for copying; restore the entry before editing it. Drafts
 are not saved to browser storage or across session expiry, so copy long unsaved notes before
 signing in again.
@@ -160,7 +161,10 @@ repairflow restore /absolute/path/repairflow.rfbak --home /absolute/path/restore
 repairflow doctor --home /absolute/path/restored-workspace
 ```
 
-Restore verifies the archive, database and attachment references before publishing the workspace.
+If a newer binary reports an outdated schema, stop the service and run
+`repairflow init --backup /absolute/pre-upgrade.rfbak --home /absolute/workspace` after creating and
+verifying that backup. Ordinary commands and `serve` refuse an outdated schema rather than migrating
+silently. Restore verifies the archive, database and attachment references before publishing the workspace.
 It never overwrites an existing workspace or a file that appears during publication. A publication
 failure rolls back files from that restore attempt. Test recovery before you need it.
 

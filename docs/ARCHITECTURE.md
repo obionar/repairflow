@@ -96,8 +96,10 @@ or configuration created by a newer schema version is refused rather than downgr
 | v9 `repair_customer_optional` | Nullable repair customer for unassigned intake |
 | v10 `label_printer` | One workspace-wide label-printer choice; empty driver means printing is off |
 
-`schema_migrations` tracks applied versions. `init` explicitly opens and migrates the database (as
-do domain commands), while `doctor` reports a missing or outdated schema without migrating or modifying records. `doctor`
+`schema_migrations` tracks applied versions. Only `init` migrates, and an outdated schema requires
+`init --backup ABSOLUTE_PATH` with a verified archive matching the workspace's current version. Domain
+commands and `serve` take a shared workspace lock and refuse an outdated schema; migration takes the
+exclusive lock, so a running server and a migration cannot overlap. `doctor` reports a missing or outdated schema without migrating or modifying records. `doctor`
 runs database integrity and foreign-key checks and hash-verifies every retained attachment against
 its stored size and SHA-256, reporting missing bytes or changed content. Revisions are derived from
 current content, not stored as independent version numbers.
@@ -131,14 +133,18 @@ Attachment purge and demo reset use a cross-process workspace lock and same-file
 links under `files/.purge/`. Original bytes are preserved until the database transaction commits,
 restored on rollback and recovered after interruption. Cleanup never removes those recovery links.
 
+Workspace opens take a shared flock on `<workspace>/run/workspace.lock`; the explicit migration
+takes the exclusive lock. The OS releases either lock on process exit, so crashes leave no stale lock.
+
 Updates authenticate and verify the artifact before installation. The updater requires regular
 files, stages and re-hashes `<executable>.new`, preserves `<executable>.prev`, verifies the published
 target and health-checks the verified bytes. Replacement or health-check failure rolls back. Updates
 share an executable lock with the source installer and re-read the installed version while locked;
 replacing a root-owned `/usr/local/bin/repairflow` requires `sudo`/`doas`, while the default
 `~/.local/bin` installation is replaced by its own account. Verified apply is Linux-only; unsigned builds and downgrades are refused. The
-optional `scripts/update-github.sh` downloads and safely extracts the exact architecture archive for
-a GitHub release tag, then hands the verified local binary and signed manifest to this same path; the
+optional `scripts/repairflow-update` downloads and safely extracts the architecture archive for the
+latest stable or an exact GitHub release tag, then hands the verified local binary and signed manifest
+to this same path; `update-github.sh` is a compatibility wrapper. The
 application performs no background update checks.
 
 Errors use stable codes from `internal/errs`. Expected validation, permission, conflict and

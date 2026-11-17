@@ -583,6 +583,9 @@ func TestServePortInUse(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if initRes := run(t, nil, "init", "--home", home, "--json"); initRes.code != 0 {
+		t.Fatalf("init: %s", initRes.stderr)
+	}
 
 	res := run(t, nil, "serve", "--home", home, "--json")
 	if res.code != 3 {

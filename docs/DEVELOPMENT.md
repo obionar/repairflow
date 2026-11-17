@@ -127,10 +127,11 @@ make license-check
 
 After changing dependencies or reviewed assets, run `make license-check`. New static/media assets
 must be reviewed and recorded in `licenses/first-party-assets.txt`. Unknown or version-mismatched
-licenses and unreviewed assets fail the check; it writes no notice document, only reports under
-`dist/licenses/`. Release archives include `LICENSE`, the signed manifest, the binary and
-`update-github.sh`; `SHA256SUMS` covers the platform archives. The release script refuses a failed
-inventory. The browser-test-only module is reported separately under `dist/licenses/` and is not
+licenses and unreviewed assets fail the check; it writes reports under `dist/licenses/`, including a
+deterministic `THIRD_PARTY_NOTICES.md`. Release archives include
+`LICENSE`, `THIRD_PARTY_NOTICES.md`, the signed manifest, the binary and the update helpers;
+`SHA256SUMS` covers the platform archives. The release script refuses a failed inventory and packages
+the generated notices. The browser-test-only module is reported separately under `dist/licenses/` and is not
 bundled with the application. Preserve the complete dependency license material required by the
 upstream licenses; an owner packaging decision is not a substitute for that obligation.
 

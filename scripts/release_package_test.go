@@ -34,6 +34,7 @@ func TestPackageReleaseWritesOnlyInstallableArchives(t *testing.T) {
 		"--amd64", amd64,
 		"--arm64", arm64,
 		"--license", write("LICENSE", "license fixture\n"),
+		"--notices", write("THIRD_PARTY_NOTICES.md", "notices fixture\n"),
 		"--manifest", write("manifest.json", `{"format_version":1}`+"\n"),
 		"--signature", write("manifest.sig", "signature fixture\n"),
 		"--update-script", write("update-github.sh", "#!/bin/sh\n"),
@@ -65,6 +66,7 @@ func TestPackageReleaseWritesOnlyInstallableArchives(t *testing.T) {
 	wantMembers := []string{
 		"repairflow",
 		"LICENSE",
+		"THIRD_PARTY_NOTICES.md",
 		"manifest.json",
 		"manifest.sig",
 		"update-github.sh",
@@ -119,8 +121,8 @@ func TestPackageReleaseWritesOnlyInstallableArchives(t *testing.T) {
 		if modes["repairflow"] != 0o755 || modes["update-github.sh"] != 0o755 {
 			t.Fatalf("%s executable modes = %o/%o", archive, modes["repairflow"], modes["update-github.sh"])
 		}
-		if modes["LICENSE"] != 0o644 || modes["manifest.json"] != 0o644 {
-			t.Fatalf("%s data modes = %o/%o", archive, modes["LICENSE"], modes["manifest.json"])
+		if modes["LICENSE"] != 0o644 || modes["THIRD_PARTY_NOTICES.md"] != 0o644 || modes["manifest.json"] != 0o644 {
+			t.Fatalf("%s data modes = %o/%o/%o", archive, modes["LICENSE"], modes["THIRD_PARTY_NOTICES.md"], modes["manifest.json"])
 		}
 	}
 

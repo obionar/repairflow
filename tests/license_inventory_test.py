@@ -70,6 +70,23 @@ class LicenseInventoryTests(unittest.TestCase):
                 VERSIONS,
             )
 
+    def test_notices_reproduce_license_texts_deterministically(self):
+        entries = [
+            {"module": "example.com/b", "version": "v2.0.0", "license": "MIT",
+             "source": "https://example.invalid/b"},
+            {"module": "example.com/a", "version": "v1.0.0", "license": "BSD-3-Clause",
+             "source": "https://example.invalid/a"},
+        ]
+        texts = {
+            "example.com/b": [("LICENSE", "MIT fixture\n")],
+            "example.com/a": [("LICENSE", "BSD fixture\n")],
+        }
+        body = license_inventory.render_notices(entries, texts)
+        self.assertIn("## example.com/b v2.0.0", body)
+        self.assertIn("MIT fixture", body)
+        self.assertIn("BSD fixture", body)
+        self.assertEqual(body, license_inventory.render_notices(entries, texts))
+
     def test_asset_review_rejects_new_and_missing_entries(self):
         reviewed = {"internal/web/static/favicon.svg", "internal/web/static/app.css"}
         license_inventory.validate_assets(reviewed, reviewed)

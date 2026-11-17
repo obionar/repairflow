@@ -3,13 +3,14 @@
 #
 #   scripts/release.sh --version 0.1.0 [--key PATH] [--pub PATH] [--out DIR] [--channel stable]
 #
-# Produces dist/<version>/ with exactly three release assets:
+# Produces dist/<version>/ with exactly four release assets:
 #   repairflow_Linux_x86_64.tar.gz
 #   repairflow_Linux_arm64.tar.gz
 #   SHA256SUMS
+#   SHA256SUMS.sig
 #
-# Each archive contains only the binary, LICENSE, the
-# signed manifest, manifest signature and the operator update scripts
+# Each archive contains only the binary, LICENSE, THIRD_PARTY_NOTICES.md,
+# the signed manifest, manifest signature and the operator update scripts
 # (update-github.sh, repairflow-update, repairflow-autoupdate). No loose binaries,
 # docs, demo launcher or source archive are published as release assets.
 # Refuses a dirty worktree, a -dev version and an existing output directory.
@@ -155,6 +156,7 @@ scripts/package-release.sh \
   --amd64 "$BUILD/repairflow-amd64" \
   --arm64 "$BUILD/repairflow-arm64" \
   --license LICENSE \
+  --notices "$REPO/dist/licenses/THIRD_PARTY_NOTICES.md" \
   --manifest "$BUILD/manifest.json" \
   --signature "$BUILD/manifest.sig" \
   --update-script scripts/update-github.sh \

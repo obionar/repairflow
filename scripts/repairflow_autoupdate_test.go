@@ -475,6 +475,7 @@ func TestAutoupdateOpenRCStopsBeforeBackupAndApply(t *testing.T) {
 		[]string{"rc-service", "repairflow stop", "|0.1.0"},
 		[]string{"repairflow", "backup create", "|0.1.0"},
 		[]string{"update", "--apply", "|0.1.0"},
+		[]string{"repairflow", "init --backup", "|9.9.9"},
 		[]string{"rc-service", "repairflow start", "|9.9.9"},
 		[]string{"repairflow", "customer list", "|9.9.9"},
 	)

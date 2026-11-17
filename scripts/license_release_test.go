@@ -40,6 +40,7 @@ func TestReleaseGateIncludesLicenseInventoryAndNotices(t *testing.T) {
 			"license_inventory.py check",
 			"scripts/package-release.sh",
 			"--license LICENSE",
+			"--notices \"$REPO/dist/licenses/THIRD_PARTY_NOTICES.md\"",
 		},
 		"verify-all.sh": {
 			"step_license_inventory",

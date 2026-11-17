@@ -4,9 +4,8 @@
 #   git clone https://github.com/obionar/repairflow && cd repairflow && ./install-repairflow
 #
 # Re-run after `git pull` to update. The installed binary is replaced atomically
-# (safe while a service is running) and every workspace database migrates
-# automatically on the next command or start, from supported previous versions.
-# Stop old writers before opening a workspace with a schema-changing upgrade.
+# (safe while a service is running). An outdated workspace schema is refused;
+# migrate explicitly with a verified backup after stopping the service.
 # Configuration and data are never rewritten by this script.
 set -eu
 LC_ALL=C
@@ -31,10 +30,11 @@ updates. Set REPAIRFLOW_PREFIX=/usr/local for the shared, root-owned layout:
 a regular user can then execute the binary but not replace it, and the script
 uses doas or sudo for only the install step.
 
-Re-run after `git pull` to update. Workspaces are untouched; their database
-schema migrates automatically on the next command or start. Restart a running
-RepairFlow service separately to pick up the new binary. Set VERSION=... to
-stamp a version other than the Makefile default.
+Re-run after `git pull` to update. Workspaces are untouched. If the new binary
+reports an outdated schema, stop the service and migrate explicitly with
+`repairflow init --backup ABSOLUTE_PATH` after a verified backup. Restart a
+running RepairFlow service separately to pick up the new binary. Set VERSION=...
+to stamp a version other than the Makefile default.
 EOF
       exit 0
       ;;
@@ -110,7 +110,8 @@ if [ -f "$workdir/config.toml" ]; then
   # Validate without opening the database: installation must not migrate a
   # workspace while its old service is still running.
   "$bin" config check --home "$workdir" >/dev/null
-  echo "Workspace $workdir kept; configuration checked without migrating its database."
+  echo "Workspace $workdir kept; configuration checked without opening the database."
+echo "An outdated schema must be migrated explicitly: repairflow init --backup ABSOLUTE_PATH"
   echo "If a RepairFlow service is installed, rerun: $bin service install --home $workdir"
 else
   echo "No workspace yet. Create one with: repairflow init"

@@ -200,7 +200,7 @@ func (s *Service) ListRepairAttachments(ctx context.Context, repairID int64, inc
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	links, err := s.repairAttachmentEntryIDs(ctx, repairID)
+	links, err := s.repairAttachmentEntryIDs(ctx, repairID, nil)
 	if err != nil {
 		return nil, err
 	}

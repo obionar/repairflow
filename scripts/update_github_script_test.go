@@ -134,8 +134,12 @@ func TestGitHubUpdateScriptChecksThenAppliesSignedRelease(t *testing.T) {
 	archive := signedUpdateArchive(t, candidateBytes, manifest, signature, nil)
 	asset := releaseArchiveName()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/obionar/repairflow/releases/latest" {
+			http.Redirect(w, r, "/obionar/repairflow/releases/tag/v"+tag, http.StatusFound)
+			return
+		}
 		base := "/obionar/repairflow/releases/download/" + tag + "/"
-		if strings.TrimPrefix(r.URL.Path, base) == asset {
+		if r.URL.Path == base+asset || r.URL.Path == "/obionar/repairflow/releases/download/v"+tag+"/"+asset {
 			_, _ = w.Write(archive)
 			return
 		}
@@ -162,6 +166,13 @@ func TestGitHubUpdateScriptChecksThenAppliesSignedRelease(t *testing.T) {
 		t.Fatalf("check output: %s", output)
 	}
 	assertBinaryVersion(t, installed, "0.1.0-rc9.1")
+	latest := exec.Command("sh", "repairflow-update", "--binary", installed)
+	latest.Env = append(cleanEnvironment(), "REPAIRFLOW_UPDATE_BASE_URL="+server.URL, "TMPDIR="+t.TempDir())
+	latestOutput, err := latest.CombinedOutput()
+	if err != nil || !strings.Contains(string(latestOutput), "update verified: v"+tag) {
+		t.Fatalf("latest stable check: %v\n%s", err, latestOutput)
+	}
+	assertBinaryVersion(t, installed, "0.1.0-rc9.1")
 	if _, err := os.Stat(installed + ".prev"); !os.IsNotExist(err) {
 		t.Fatalf("check created a rollback binary: %v", err)
 	}
@@ -175,6 +186,14 @@ func TestGitHubUpdateScriptChecksThenAppliesSignedRelease(t *testing.T) {
 	}
 	assertBinaryVersion(t, installed, "0.1.0-rc9.2")
 	assertBinaryVersion(t, installed+".prev", "0.1.0-rc9.1")
+}
+
+func TestUpdateHelperRestartRequiresApply(t *testing.T) {
+	cmd := exec.Command("sh", "repairflow-update", "--restart")
+	output, err := cmd.CombinedOutput()
+	if err == nil || !strings.Contains(string(output), "--restart requires --apply") {
+		t.Fatalf("restart without apply must be a usage error: %v\n%s", err, output)
+	}
 }
 
 func TestGitHubUpdateScriptRefusalsPreserveInstalledBinary(t *testing.T) {

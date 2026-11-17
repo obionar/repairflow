@@ -10,13 +10,28 @@ import (
 	"repairflow/internal/db"
 	"repairflow/internal/errs"
 	"repairflow/internal/files"
+	"repairflow/internal/workspace"
 )
 
-// openService opens (creating if needed) the workspace database and returns
-// the application service. The schema is forward-only embedded migrations: a
-// fresh database is created at the latest version; a database from a newer
-// version is refused. Nothing here touches data outside the workspace.
+// openService opens the workspace under a shared writer lock. Ordinary domain
+// commands and serve never migrate: an outdated schema is refused with the
+// explicit backup/migration remedy below.
 func openService(ctx context.Context, home string, logger *slog.Logger) (*app.Service, func(), error) {
+	unlock, err := workspace.Lock(ctx, home, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	svc, closeDB, err := openServiceDatabase(ctx, home, logger, false)
+	if err != nil {
+		unlock()
+		return nil, nil, err
+	}
+	return svc, func() { closeDB(); unlock() }, nil
+}
+
+// openServiceDatabase opens the database without taking the workspace lock.
+// migrate is reserved for the explicit init path, which holds the exclusive lock.
+func openServiceDatabase(ctx context.Context, home string, logger *slog.Logger, migrate bool) (*app.Service, func(), error) {
 	started := time.Now()
 	logger.Debug("database open", "operation", "open_service", "home", home)
 	handle, err := db.Open(ctx, db.Path(home))
@@ -24,10 +39,27 @@ func openService(ctx context.Context, home string, logger *slog.Logger) (*app.Se
 		logger.Debug("database open failed", "operation", "open_service", "error_code", errs.CodeOf(err))
 		return nil, nil, err
 	}
-	if err := db.Migrate(ctx, handle); err != nil {
-		_ = handle.Close()
-		logger.Debug("database migration failed", "operation", "migrate", "error_code", errs.CodeOf(err))
-		return nil, nil, err
+	if migrate {
+		if err := db.Migrate(ctx, handle); err != nil {
+			_ = handle.Close()
+			logger.Debug("database migration failed", "operation", "migrate", "error_code", errs.CodeOf(err))
+			return nil, nil, err
+		}
+	} else {
+		current, err := db.CurrentVersion(ctx, handle)
+		if err != nil {
+			_ = handle.Close()
+			return nil, nil, err
+		}
+		if current > db.LatestVersion() {
+			_ = handle.Close()
+			return nil, nil, errs.New(errs.CodeConfigVersion,
+				"database schema version %d is newer than the supported version %d; upgrade RepairFlow first", current, db.LatestVersion())
+		}
+		if current < db.LatestVersion() {
+			_ = handle.Close()
+			return nil, nil, schemaGateError(home, current, db.LatestVersion())
+		}
 	}
 	svc := app.New(handle).WithStore(files.New(home))
 	if err := svc.RecoverPendingDeletes(ctx); err != nil {
@@ -42,6 +74,12 @@ func openService(ctx context.Context, home string, logger *slog.Logger) (*app.Se
 			logger.Error("database close failed", "operation", "close_database", "error", err)
 		}
 	}, nil
+}
+
+func schemaGateError(home string, current, latest int) error {
+	return errs.New(errs.CodeConflict,
+		"workspace schema version %d is older than the supported version %d; stop the service, run `repairflow backup create --output ABSOLUTE_PATH --home %s`, then `repairflow init --backup ABSOLUTE_PATH --home %s`",
+		current, latest, home, home)
 }
 
 // resolveActor picks the audit identity for mutations: explicit --actor,

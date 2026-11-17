@@ -76,7 +76,7 @@ parse input and render output. `internal/files` owns attachment paths and origin
 | `tests/e2e/` | Real-binary Chromium workflows; separate Go module |
 | `tests/*.py` | Disposable CLI lifecycle and hostile-input smoke tests |
 | `scripts/verify-all.sh` | Full local verification gate |
-| `scripts/update-github.sh` | Operator-invoked signed GitHub release download |
+| `scripts/repairflow-update`, `update-github.sh` | Canonical signed GitHub update helper and compatibility wrapper |
 | `install-repairflow` | One-command build-and-install/update from a source checkout |
 
 ## Contracts and tests

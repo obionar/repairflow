@@ -5,9 +5,10 @@ The runtime report covers packages compiled into ./cmd/repairflow for both shipp
 Linux architectures. The separate browser-test module is reported for development
 inventory only; its dependencies are not shipped in RepairFlow binaries.
 
-No notice document is generated: the check verifies that every compiled dependency
-carries a known license and that first-party assets are reviewed. Reports land in
-dist/licenses/ (ignored by git).
+The check verifies that every compiled dependency carries a known license and
+that first-party assets are reviewed. It writes a deterministic
+THIRD_PARTY_NOTICES.md beside its reports in dist/licenses/ (ignored by git); the
+release script packages that generated document.
 """
 from __future__ import annotations
 
@@ -244,6 +245,30 @@ def merge_platform_entries(
         target[module] = entry
 
 
+def render_notices(entries: list[dict], texts: dict[str, list[tuple[str, str]]]) -> str:
+    out = [
+        "# Third-party notices",
+        "",
+        "RepairFlow binaries include the following compiled dependencies. Their",
+        "license and attribution texts are reproduced below from the exact module",
+        "versions used to build the release.",
+        "",
+    ]
+    for entry in entries:
+        module = entry["module"]
+        out.extend([
+            f"## {module} {entry['version']}",
+            "",
+            f"License: {entry['license']}",
+            "",
+            f"Source: {entry['source']}",
+            "",
+        ])
+        for name, body in texts[module]:
+            out.extend([f"### {name}", "", "````text", body.rstrip(), "````", ""])
+    return "\n".join(out) + "\n"
+
+
 def generate() -> list[dict]:
     verify_project_license()
     validate_assets(tracked_assets(), reviewed_assets())
@@ -265,18 +290,27 @@ def generate() -> list[dict]:
     (OUTPUT_DIR / "browser-tests-report.tsv").write_text(e2e_raw, encoding="utf-8")
 
     machine_inventory = []
+    notice_texts: dict[str, list[tuple[str, str]]] = {}
     for module in sorted(runtime_entries):
         version, directory = module_details(module)
+        files = legal_files(directory)
+        notice_texts[module] = [
+            (path.name, path.read_text(encoding="utf-8", errors="replace"))
+            for path in files
+        ]
         machine_inventory.append({
             "module": module,
             "version": version,
             "license": runtime_entries[module].license,
             "source": runtime_entries[module].url,
             "platforms": sorted(module_platforms[module]),
-            "notice_files": [path.name for path in legal_files(directory)],
+            "notice_files": [path.name for path in files],
         })
     (OUTPUT_DIR / "runtime-inventory.json").write_text(
         json.dumps(machine_inventory, indent=2) + "\n", encoding="utf-8"
+    )
+    (OUTPUT_DIR / "THIRD_PARTY_NOTICES.md").write_text(
+        render_notices(machine_inventory, notice_texts), encoding="utf-8"
     )
     return machine_inventory
 

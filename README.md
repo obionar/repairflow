@@ -63,7 +63,8 @@ Copyright (C) 2026 RepairFlow contributors.
 
 RepairFlow is licensed under **AGPL-3.0-only**; see [LICENSE](LICENSE). This includes source-sharing
 obligations for modified versions offered through a network interface. The compiled dependencies
-are BSD-3-Clause and MIT; `make license-check` verifies that inventory.
+are BSD-3-Clause and MIT; `make license-check` verifies that inventory and writes
+`dist/licenses/THIRD_PARTY_NOTICES.md`. Release archives include that generated notice document.
 
 ### Verify a release
 
@@ -74,6 +75,11 @@ the archive you downloaded. `repairflow update verify --file SHA256SUMS --signat
 uses the key embedded in an installed binary; the pre-install `openssl` recipe is in
 [the install guide](docs/INSTALL.md#from-a-release-archive). A bare checksum pass proves only that a
 file matches a list that arrived with it.
+
+For an existing installation, `repairflow-update` checks the latest stable release without changing
+anything. After the backup/stop checks in [the upgrade guide](docs/DEPLOY.md#upgrade), use
+`repairflow-update --apply --restart` to apply it and restart the default service. An exact tag,
+such as `v0.2.0-rc6`, selects a prerelease.
 
 ## Quick start
 
@@ -138,10 +144,11 @@ repairflow serve
 ```
 
 Open <http://127.0.0.1:8091/login>. The default workspace is `~/.repairflow`; use `--home PATH` or
-`REPAIRFLOW_HOME` to choose another location. `init` creates the configuration and initializes or
-migrates the SQLite database without creating records or accounts, so `doctor` is healthy directly
-afterwards. Installing a new binary from source only validates existing configuration; it does not
-open or migrate the database. For upgrades, take a verified backup and stop old writers first, as
+`REPAIRFLOW_HOME` to choose another location. `init` creates the configuration and initializes the SQLite database without creating records or
+accounts, so `doctor` is healthy directly afterwards. Installing a new binary from source only
+validates existing configuration; it does not open or migrate the database. An outdated schema is
+refused by ordinary commands; migrate explicitly with `init --backup ABSOLUTE_PATH` after a verified
+backup and stopping the service. For upgrades, take a verified backup and stop old writers first, as
 [the deployment guide](docs/DEPLOY.md#upgrade) describes. See [the installation guide](docs/INSTALL.md)
 for release verification, roles and troubleshooting.
 

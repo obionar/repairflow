@@ -40,7 +40,7 @@ func TestCorrectionAndPickupDraftsSurviveValidation(t *testing.T) {
 	if got.Entries[0].Body != "Saved entry" {
 		t.Fatal("rejected correction changed saved text")
 	}
-	revisions, err := f.svc.ListRepairEntryRevisions(ctx, repair.ID)
+	revisions, err := f.svc.ListRepairEntryRevisions(ctx, repair.ID, nil)
 	testutil.Must(t, err)
 	if len(revisions) != 0 {
 		t.Fatal("rejected correction created an audit revision")

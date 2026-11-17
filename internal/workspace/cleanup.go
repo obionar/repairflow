@@ -52,8 +52,8 @@ func Cleanup(home string) (*CleanupResult, error) {
 		}
 		name := e.Name()
 		full := filepath.Join(runDir, name)
-		if name == "purge.lock" {
-			continue // purge/recovery serialization lock; never diagnostic noise
+		if name == "purge.lock" || name == "workspace.lock" {
+			continue // cross-process locks; never disposable staging or diagnostic noise
 		}
 		if !strings.HasSuffix(name, ".part") && !strings.HasPrefix(name, "multipart-") {
 			res.Skipped = append(res.Skipped, filepath.Join("run", name))

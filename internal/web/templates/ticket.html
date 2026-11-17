@@ -178,6 +178,10 @@
     </form>
   </div>
   {{end}}
+  {{if or .Data.EntryPrev .Data.EntryNext}}<nav class="pagination" aria-label="{{$.Tr "repairs.pages"}}">
+    {{if .Data.EntryPrev}}<a id="entries-prev" href="?entries_page={{.Data.EntryPrev}}#saved-log">{{$.Tr "common.previous"}}</a>{{end}}
+    {{if .Data.EntryNext}}<a id="entries-next" href="?entries_page={{.Data.EntryNext}}#saved-log">{{$.Tr "common.next"}}</a>{{end}}
+  </nav>{{end}}
   </div>
 </details>
 
@@ -251,6 +255,10 @@
     {{end}}</ul>
   </details>
   {{end}}
+  {{if or .Data.PartPrev .Data.PartNext}}<nav class="pagination" aria-label="{{$.Tr "repairs.pages"}}">
+    {{if .Data.PartPrev}}<a id="parts-prev" href="?parts_page={{.Data.PartPrev}}#parts-panel">{{$.Tr "common.previous"}}</a>{{end}}
+    {{if .Data.PartNext}}<a id="parts-next" href="?parts_page={{.Data.PartNext}}#parts-panel">{{$.Tr "common.next"}}</a>{{end}}
+  </nav>{{end}}
   </div>
 </details>
 
@@ -340,6 +348,10 @@
     {{end}}</ul>
   </details>
   {{end}}
+  {{if or .Data.AttachmentPrev .Data.AttachmentNext}}<nav class="pagination" aria-label="{{$.Tr "repairs.pages"}}">
+    {{if .Data.AttachmentPrev}}<a id="attachments-prev" href="?attachments_page={{.Data.AttachmentPrev}}#gallery-panel">{{$.Tr "common.previous"}}</a>{{end}}
+    {{if .Data.AttachmentNext}}<a id="attachments-next" href="?attachments_page={{.Data.AttachmentNext}}#gallery-panel">{{$.Tr "common.next"}}</a>{{end}}
+  </nav>{{end}}
   </div>
 </details>
 
@@ -362,13 +374,17 @@
 </details>
 
 <details class="panel fold-panel" id="activity-panel">
-  <summary class="section-heading"><h2 id="activity-heading">{{$.Tr "repair.activity" (len .Data.Activity)}}</h2></summary>
+  <summary class="section-heading"><h2 id="activity-heading">{{$.Tr "repair.activity" .Data.ActivityTotal}}</h2></summary>
   <div class="panel-body">
     {{if .Data.Activity}}
     <ol class="history-list" id="activity-list">{{range .Data.Activity}}
       <li><time datetime="{{.CreatedAt}}">{{when .CreatedAt}}</time> <strong>{{$.Act .Action}}</strong> — {{.Actor}}{{if .Detail}} · {{detail .Detail}}{{end}}</li>
     {{end}}</ol>
     {{else}}<p class="muted" id="activity-list">{{$.Tr "repair.no_activity"}}</p>{{end}}
+    {{if or .Data.ActivityPrev .Data.ActivityNext}}<nav class="pagination" aria-label="{{$.Tr "repairs.pages"}}">
+      {{if .Data.ActivityPrev}}<a id="activity-prev" href="?activity_page={{.Data.ActivityPrev}}#activity-panel">{{$.Tr "common.previous"}}</a>{{end}}
+      {{if .Data.ActivityNext}}<a id="activity-next" href="?activity_page={{.Data.ActivityNext}}#activity-panel">{{$.Tr "common.next"}}</a>{{end}}
+    </nav>{{end}}
   </div>
 </details>
 {{template "tail" .}}

@@ -344,6 +344,12 @@ if ! run_log "$fetch" "$cand" --apply; then
 fi
 candidate_applied=1
 
+# Migrate only through the explicit gate: the verified pre-update backup is the
+# restore point, and the exclusive workspace lock keeps other writers out.
+if ! run_log "$bin" --home "$home" init --backup "$bkp"; then
+  reject_candidate "$cand was installed but its schema migration was refused; workspace and $bkp are intact"
+fi
+
 # The candidate's own identity is the expected health target.
 vjson=$("$bin" version --json 2>/dev/null) ||
   reject_candidate "cannot read the installed version after apply"

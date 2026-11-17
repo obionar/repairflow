@@ -30,12 +30,13 @@ execute the binary but not replace it, and the installer uses `doas` or `sudo` f
 To update, run
 `git pull && ./install-repairflow` again: the binary is replaced atomically
 under the same executable lock as signed updates, existing workspaces and configuration are kept,
-and each workspace database migrates automatically on the next command or
-start, from any supported previous version. The installer itself runs only `config check` on an
-existing workspace; it does not open or migrate its database. Restart a running RepairFlow
-service separately to pick up the new binary. For a schema-changing upgrade, take and verify a backup
-first and stop the service before the new binary opens the workspace; an executable-only rollback
-does not revert a migrated schema. Binary replacement does not refresh service units or update
+and the installer validates the existing configuration without opening or
+migrating its database. Restart a running RepairFlow service separately to pick up the new binary.
+An outdated schema is refused by the new binary; migrate explicitly with a verified backup after
+stopping the service. For a schema-changing upgrade, take and verify a backup
+first and stop the service before the new binary opens the workspace. Then run
+`repairflow init --backup /absolute/pre-upgrade.rfbak` with the new binary; an executable-only
+rollback does not revert a migrated schema. Binary replacement does not refresh service units or update
 helpers automatically. If the binary path or generated unit template changes, **stop the service
 using the old unit first**, then run the new binary's `service install --no-enable --home
 /absolute/workspace --init openrc` (or `--init systemd`), inspect the replacement and start the
@@ -51,7 +52,7 @@ verification below needs `openssl` and `xxd`; they are verification tools, not a
 
 ```bash
 set -eu                         # stop before extraction if any verification step fails
-TAG=v0.2.0-rc5
+TAG=v0.2.0-rc6
 ASSET=repairflow_Linux_arm64.tar.gz          # repairflow_Linux_x86_64.tar.gz on amd64
 BASE=https://github.com/obionar/repairflow/releases/download/$TAG
 wget -q "$BASE/$ASSET" "$BASE/SHA256SUMS" "$BASE/SHA256SUMS.sig"
@@ -93,14 +94,17 @@ property when installing that way; do not make the directory writable by the ser
 signed update of such an installation needs `sudo`/`doas` for the apply step; see
 [Deployment](DEPLOY.md).
 
-Only the matching line is checked, so the second architecture's archive is not needed.
+Only the matching line is checked, so the second architecture's archive is not needed. Later stable
+updates can be checked with `repairflow-update` and applied with `repairflow-update --apply`; add
+`--restart` to restart the default service. Take a verified backup and stop old writers first for a
+schema-changing upgrade.
 
 Prereleases are never GitHub `latest`; fetch them by exact tag from the releases page (for example
 `…/releases/tag/v0.2.0-rc1`). Between prereleases there is **no migration promise**: a workspace may
 need to be recreated instead of migrated, and an older binary refuses a newer schema. Take a verified
 backup before opening a workspace with a newer binary.
 
-Use `repairflow_Linux_arm64.tar.gz` on ARM64. The archive also contains `LICENSE`, `manifest.json`,
+Use `repairflow_Linux_arm64.tar.gz` on ARM64. The archive also contains `LICENSE`, `THIRD_PARTY_NOTICES.md`, `manifest.json`,
 `manifest.sig` and the update helpers; keep the archive or those files with the installation to
 preserve the license and support offline verification. Keep the
 executable at a stable path: service units and updates refer to that location.
@@ -169,8 +173,9 @@ Open <http://127.0.0.1:8091/login> and sign in with the account you created. The
 sign-up page.
 
 `init` supports `en`, `el`, `ru`, `tr`, `es`, `fr` and `de`. It creates the workspace configuration
-and initializes or migrates the SQLite database, but creates no records or accounts, so `doctor` is
-healthy immediately afterwards. Use `repairflow init --interactive` to answer prompts for the
+and initializes the SQLite database, but creates no records or accounts, so `doctor` is healthy
+immediately afterwards. An outdated schema is migrated only with `init --backup ABSOLUTE_PATH`
+after a verified backup and stopped service. Use `repairflow init --interactive` to answer prompts for the
 workspace, port, language and optional demo data. Initialization never overwrites an existing
 configuration or existing records, and `--language` on an existing workspace reports that the
 existing language was kept.

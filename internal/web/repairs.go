@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -167,6 +168,13 @@ func repairFormOf(t app.Repair) repairForm {
 type entryForm struct{ Kind, Body string }
 type pickupForm struct{ By, Notes string }
 
+const (
+	entryPageSize      = 20
+	activityPageSize   = 50
+	partPageSize       = 50
+	attachmentPageSize = 24
+)
+
 type repairView struct {
 	app.RepairDetail
 	// Repair carries the record for the templates.
@@ -190,52 +198,77 @@ type repairView struct {
 	DeletedEntries []app.Entry
 	EntryRevisions map[int64][]app.EntryRevision
 	// LabelDriver is the configured label printer, empty when printing is off.
-	LabelDriver string
+	LabelDriver                    string
+	ActivityTotal                  int
+	EntryPrev, EntryNext           int
+	ActivityPrev, ActivityNext     int
+	PartPrev, PartNext             int
+	AttachmentPrev, AttachmentNext int
 }
 
-func (s *Server) repairViewData(ctx context.Context, id int64) (repairView, error) {
-	detail, err := s.svc.GetRepair(ctx, id, true)
+func (s *Server) repairViewData(ctx context.Context, id int64, queries ...url.Values) (repairView, error) {
+	query := url.Values{}
+	if len(queries) > 0 {
+		query = queries[0]
+	}
+	page := func(name string) int {
+		value, _ := strconv.Atoi(query.Get(name))
+		return value
+	}
+	record, err := s.svc.GetRepairRow(ctx, id)
 	if err != nil {
 		return repairView{}, err
 	}
+	detail := app.RepairDetail{Repair: record}
 	customers, err := s.svc.ListCustomers(ctx, app.CustomerFilter{PerPage: 100})
 	if err != nil {
 		return repairView{}, err
 	}
-	active := make([]app.Entry, 0, len(detail.Entries))
+	entries, err := s.svc.ListRepairEntriesPage(ctx, id, true, page("entries_page"), entryPageSize)
+	if err != nil {
+		return repairView{}, err
+	}
+	activity, err := s.svc.ListRepairActivityPage(ctx, id, page("activity_page"), activityPageSize)
+	if err != nil {
+		return repairView{}, err
+	}
+	detail.Activity = activity.Items
+	active := make([]app.Entry, 0, len(entries.Items))
 	deleted := make([]app.Entry, 0)
-	for _, entry := range detail.Entries {
+	entryIDs := make([]int64, len(entries.Items))
+	for i, entry := range entries.Items {
+		entryIDs[i] = entry.ID
 		if entry.DeletedAt != "" {
 			deleted = append(deleted, entry)
 		} else {
 			active = append(active, entry)
 		}
 	}
-	revisions, err := s.svc.ListRepairEntryRevisions(ctx, id)
+	revisions, err := s.svc.ListRepairEntryRevisions(ctx, id, entryIDs)
 	if err != nil {
 		return repairView{}, err
 	}
 	detail.Entries = active
-	allParts, err := s.svc.ListRepairParts(ctx, id, true)
+	allParts, err := s.svc.ListRepairPartsPage(ctx, id, true, page("parts_page"), partPageSize)
 	if err != nil {
 		return repairView{}, err
 	}
-	parts := make([]app.Part, 0, len(allParts))
+	parts := make([]app.Part, 0, len(allParts.Items))
 	deletedParts := make([]app.Part, 0)
-	for _, part := range allParts {
+	for _, part := range allParts.Items {
 		if part.DeletedAt != "" {
 			deletedParts = append(deletedParts, part)
 		} else {
 			parts = append(parts, part)
 		}
 	}
-	allAtts, err := s.svc.ListRepairAttachments(ctx, id, true)
+	allAtts, err := s.svc.ListRepairAttachmentsPage(ctx, id, true, page("attachments_page"), attachmentPageSize)
 	if err != nil {
 		return repairView{}, err
 	}
-	atts := make([]app.Attachment, 0, len(allAtts))
+	atts := make([]app.Attachment, 0, len(allAtts.Items))
 	deletedAtts := make([]app.Attachment, 0)
-	for _, attachment := range allAtts {
+	for _, attachment := range allAtts.Items {
 		switch attachment.State {
 		case "attached":
 			atts = append(atts, attachment)
@@ -255,6 +288,10 @@ func (s *Server) repairViewData(ctx context.Context, id int64) (repairView, erro
 	if err != nil {
 		return repairView{}, err
 	}
+	entryPrev, entryNext := pageBounds(entries)
+	activityPrev, activityNext := pageBounds(activity)
+	partPrev, partNext := pageBounds(allParts)
+	attachmentPrev, attachmentNext := pageBounds(allAtts)
 	return repairView{
 		RepairDetail: detail, Repair: detail.Repair,
 		Customers: customers,
@@ -265,7 +302,12 @@ func (s *Server) repairViewData(ctx context.Context, id int64) (repairView, erro
 		PartForm: partForm{Fields: map[string]string{}}, PartForms: partForms,
 		CaptionDrafts:  map[int64]string{},
 		DeletedEntries: deleted, EntryRevisions: revisions,
-		LabelDriver: labelPrinter.Driver,
+		LabelDriver:   labelPrinter.Driver,
+		ActivityTotal: activity.Total,
+		EntryPrev:     entryPrev, EntryNext: entryNext,
+		ActivityPrev: activityPrev, ActivityNext: activityNext,
+		PartPrev: partPrev, PartNext: partNext,
+		AttachmentPrev: attachmentPrev, AttachmentNext: attachmentNext,
 	}, nil
 }
 
@@ -274,7 +316,7 @@ func (s *Server) repairFormError(w http.ResponseWriter, r *http.Request, sess ap
 		s.renderError(w, r, sessView(sess), err, statusOf(err))
 		return
 	}
-	view, verr := s.repairViewData(r.Context(), id)
+	view, verr := s.repairViewData(r.Context(), id, r.URL.Query())
 	if verr != nil {
 		s.renderError(w, r, sessView(sess), verr, statusOf(verr))
 		return
@@ -289,7 +331,7 @@ func (s *Server) repairShow(w http.ResponseWriter, r *http.Request, sess app.Ses
 		s.renderError(w, r, sessView(sess), err, statusOf(err))
 		return
 	}
-	view, err := s.repairViewData(r.Context(), id)
+	view, err := s.repairViewData(r.Context(), id, r.URL.Query())
 	if err != nil {
 		s.renderError(w, r, sessView(sess), err, statusOf(err))
 		return
